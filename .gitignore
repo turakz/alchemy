@@ -1,0 +1,72 @@
+# ========================
+# CMake / build directories
+# ========================
+/build/
+/CMakeFiles/
+/CMakeCache.txt
+/CMakeScripts/
+/Makefile
+/*.cmake
+/compile_commands.json
+/*.dir
+/*.obj
+/*.o
+/*.exe
+/*.dll
+/*.lib
+/*.so
+/*.dylib
+
+# ========================
+# IDE / Editor files
+# ========================
+# Visual Studio
+*.VC.db
+*.VC.opendb
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# CLion
+.idea/
+/*.iml
+cmake-build-*/
+
+# Vim / Neovim
+*.swp
+*.swo
+*.un~
+*.vimrc
+
+# Emacs
+*~
+\#*\#
+\.#*
+
+# ========================
+# OS-specific
+# ========================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.nfs*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ========================
+# Misc / temporary
+# ========================
+*.log
+*.tmp
+*.bak
+*.old
+.cache/
