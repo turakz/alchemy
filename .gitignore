@@ -5,7 +5,6 @@
 /CMakeFiles/
 /CMakeCache.txt
 /CMakeScripts/
-/Makefile
 /*.cmake
 /compile_commands.json
 /*.dir
