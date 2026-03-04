@@ -434,7 +434,7 @@ Phase 4a wrapper elimination successfully achieved:
 - ✅ **Zero information loss**: Each StructDef knows its sourceFile, operations group internally
 - ✅ **Maintainability**: Easier to understand, fewer abstractions, clearer data flow
 
-### Cumulative Performance Improvements (v1.0 → v2.9)
+### Cumulative Performance Improvements (v1.0 → v3.0)
 
 | Version | Instructions | Change from v1.0 | Cumulative Improvement |
 |---------|-------------|------------------|------------------------|
@@ -447,9 +447,10 @@ Phase 4a wrapper elimination successfully achieved:
 | v2.6 (code cleanup + refactoring) | 194,443,179 | -78.8M (-28.8%) | 28.8% |
 | v2.7 (safety + validation) | 196,604,356 | -76.7M (-28.1%) | 28.1% |
 | v2.8 (CRTP + template pipeline) | 127,783,834 | -145.5M (-53.2%) | 53.2% |
-| **v2.9 (compiler adapter refactor)** | **119,614,824** | **-153.7M (-56.2%)** | **56.2%** |
+| v2.9 (compiler adapter refactor) | 119,614,824 | -153.7M (-56.2%) | 56.2% |
+| **v3.0 (path→string + buffer caching)** | **106,669,829** | **-166.6M (-61.0%)** | **61.0%** |
 
-**Total Performance Gain: 56.2% reduction in instructions since v1.0**
+**Total Performance Gain: 61.0% reduction in instructions since v1.0**
 
 ## Safety & Validation Improvements (v2.7 - 2025-10-28)
 
@@ -555,12 +556,12 @@ After refactoring compiler adapters from polymorphic inheritance to translator p
 
 **From**: Polymorphic inheritance with virtual function calls
 - `CompilationDatabaseBase` CRTP base class
-- `IARCompilationDatabase` and `MSVCCompilationDatabase` derived classes
+- `IarCompilationDatabase` and `MsvcCompilationDatabase` derived classes
 - Factory creates database objects polymorphically
 - ClangParser intercepts database calls via inheritance
 
 **To**: Translator pattern with composition
-- `IARDbTranslator` and `MSVCDbTranslator` - pure translation logic
+- `IarDbTranslator` and `MsvcDbTranslator` - pure translation logic
 - `ClangCompilationDatabaseAdapter` - wraps translated commands
 - `CompilationDatabaseFactory` - detects compiler, translates, wraps
 - ClangParser uses adapter directly without polymorphic interception
@@ -608,6 +609,96 @@ After refactoring compiler adapters from polymorphic inheritance to translator p
 2. ✅ **Better testability**: Translator functions can be unit tested without ClangTool
 3. ✅ **Cleaner architecture**: Detection → Translation → Adapter composition
 4. ✅ **No regression**: Wall-clock time unchanged
+
+---
+
+## Performance Optimization Pass (v3.0 - 2026-03-12)
+
+After refactoring `clang_struct_extractor.cpp` (helper function extraction, two edge case crash fixes), profiled to check for regressions and found optimization opportunities:
+
+### Instruction Count Comparison
+
+| Metric                 | v2.9 | v3.0 | Change |
+|------------------------|------|------|--------|
+| **Total Instructions** | 119,614,824 | **106,669,829** | **-12.9M (-10.8%)** |
+| **Wall-clock (callgrind)** | ~1,302ms | **~942ms** | -360ms (-28%) |
+
+### Optimization Changes
+
+**1. `std::filesystem::path` → `std::string` for stored path fields**
+
+Converted 5 data-carrying path fields that only store paths as strings (no path decomposition on the hot path):
+- `StructDef::sourceFile`, `RefactorRecipe::sourceFile`, `SAlignMetrics::sourceFile`
+- `TransmutationResult::file`, `FileStats::file`
+- All map keys using `std::filesystem::path` → `std::string`
+
+`std::filesystem::path` parses path components (`_M_split_cmpts`) on every copy. This was consuming ~3.9M instructions (3.2% of v2.9 total). After conversion: 57K instructions (0.05%) — **98.5% reduction in path overhead**.
+
+The 3 call sites that need `.filename()` (reporter display, temp file naming) use `std::filesystem::path(str).filename()` inline on the cold path.
+
+**2. Cached `getBufferData(fieldFileID)` in `extractField`**
+
+`getBufferData` was called independently in 3 methods per field:
+- `computeFieldByteOffset` — field byte offset correction
+- `extractSourceTypeInfo` — source-faithful type name extraction
+- `extractPrecedingComment` — preceding comment detection
+
+Fetched once in `extractField` and passed as `llvm::StringRef fieldBuf` to all 3 methods. Eliminates 2 redundant lookups per field (2000 fields in test workload).
+
+`extractTrailingComment` uses `getBufferData(getFileID(endPos))` — different FileID (endPos may be in a different file for BuiltinTypeLoc types), so it remains unchanged.
+
+### Component-Level Analysis (v3.0 - 106.7M instructions)
+
+| Component                  | Instructions | % of Total | Change from v2.9 |
+|----------------------------|--------------|------------|-------------------|
+| **Dynamic Linking**        | ~11.6M       | ~10.9%     | -0.1M (noise) |
+| **Memory Allocation**      | ~15.3M       | ~14.3%     | -2.9M (-16%) |
+| **Memory Operations**      | ~3.6M        | ~3.4%      | -0.6M (-14%) |
+| **LLVM Infrastructure**    | ~7.3M        | ~6.8%      | -1.2M (-14%) |
+| **Clang Lexer/Preprocessing** | ~4.8M     | ~4.5%      | -0.4M (-8%) |
+| **Clang Type System**      | ~4.0M        | ~3.8%      | -0.3M (-7%) |
+| **String Operations**      | ~2.6M        | ~2.4%      | -0.5M (-16%) |
+| **Filesystem Operations**  | ~0.1M        | ~0.1%      | **-2.5M (-96%)** |
+| **Clang Source Manager**   | ~2.4M        | ~2.3%      | -0.4M (-14%) |
+| **Alchemy Code**           | ~5.7M        | ~5.3%      | +4.6M (expanded tracking) |
+
+### Alchemy-Specific Functions (Top 10)
+
+**Total Alchemy Code: 5.7M instructions (5.3% of total)**
+
+| Function | Instructions | % of Total |
+|----------|--------------|------------|
+| `StructExtractor::extractField` | 897,000 | 0.84% |
+| `StructExtractor::extractPrecedingComment` | 863,704 | 0.81% |
+| `FieldDef` copy constructor | 792,000 | 0.74% |
+| `FieldDef` move assignment | 791,500 | 0.74% |
+| `StructExtractor::extractTrailingComment` | 684,500 | 0.64% |
+| `StructExtractor::extractStruct` | 467,500 | 0.44% |
+| `buildReplacementText` | 314,500 | 0.29% |
+| `StructExtractor::extractSourceTypeInfo` | 260,000 | 0.24% |
+| `StructAlignmentOperation::analyzeStruct` | 253,004 | 0.24% |
+| `FieldDef` destructor (vector cleanup) | 251,533 | 0.24% |
+
+### std::ranges/algorithm Analysis
+
+Examined 15 raw loops across 5 hot-path files (`clang_struct_extractor.cpp`, `salign_operation.cpp`, `transmute.cpp`, `pipeline.cpp`, `salign_reporter.cpp`). No opportunities found — the v2.5 pass already converted meaningful cases. Remaining loops have character-level buffer scanning or complex control flow where manual iteration is the correct choice.
+
+### Key Findings
+
+1. **`std::filesystem::path` was a hidden bottleneck**: 3.2% of total execution spent parsing path components on copies — eliminated by storing paths as `std::string`
+2. **Buffer caching saves redundant lookups**: Fetching `getBufferData` once instead of 3x per field reduces source manager overhead
+3. **Cascading savings**: Removing path objects reduces memory allocation churn (fewer heap allocations for path component lists), reducing `_int_malloc`/`_int_free` costs
+4. **10.8% improvement from data type optimization**: No algorithmic changes — purely eliminating unnecessary object construction overhead
+
+### Remaining Optimization Opportunities (Post-v3.0)
+
+**High Priority** (still significant):
+1. ClangTool/LLVM initialization (~45%, ~48M instructions) - per-file overhead dominates
+2. Memory allocation churn (~14%, ~15M instructions) - reduced from v2.9 but still significant
+
+**Low Priority** (diminishing returns):
+3. FieldDef copy/move overhead (~1.7M, ~1.6%) - consider move semantics audit
+4. `getBufferData` remaining calls (~540K, ~0.5%) - from `extractTrailingComment` (different FileID, cannot cache)
 
 ---
 
@@ -797,6 +888,8 @@ The 4.9% instruction reduction came from three **code quality improvements**:
 5. ~~Discovery~~ - **DONE** (v1.2: negligible)
 6. ~~ParseResults wrapper~~ - **DONE** (v2.4: eliminated, -3.5%)
 7. ~~Raw loops~~ - **DONE** (v2.5: STL algorithms, -4.9%)
+8. ~~Filesystem path overhead~~ - **DONE** (v3.0: path→string, -98.5% path overhead)
+9. ~~Redundant buffer lookups~~ - **DONE** (v3.0: getBufferData caching)
 
 ### Architecture Validation
 
@@ -823,6 +916,7 @@ Phase v2.5 refactoring successfully achieved:
 - v2.6 refactoring: Code cleanup + helper function extraction (2025-01-25)
 - v2.7 improvements: Safety + validation (compilation database, conflict resolution, fatal error detection) (2025-10-28)
 - v2.8 refactoring: CRTP for operations + template-based pipeline for dependency injection (2025-10-29)
+- v3.0 optimization: std::filesystem::path → std::string + getBufferData caching (2026-03-12)
 
 ## 🔧 Optimization ideas:
 

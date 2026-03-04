@@ -1,8 +1,6 @@
 // tests/unit/test_preflight_validator.cpp
 
 // std
-#include <chrono>
-
 #include <filesystem>
 #include <string>
 #include <unordered_map>
@@ -24,11 +22,8 @@ protected:
   SetUp() override
   {
     // create temp directory for tests
-    tempDir = std::filesystem::temp_directory_path() /
-              "alchemy_preflight_test" /
-              std::to_string(
-                  std::chrono::steady_clock::now().time_since_epoch().count());
-    std::filesystem::create_directories(tempDir);
+    tempDir = alchemy::testing::utils::createTempTestDirectory(
+        "alchemy_preflight_test");
   }
 
   void
@@ -292,12 +287,11 @@ TEST_F(PreflightValidatorTest, CheckIfCanApplyRecipesPassesForAllValidFiles)
   auto file2 = utils::createTestFile(tempDir, "file2.txt", "content2");
   auto file3 = utils::createTestFile(tempDir, "file3.txt", "content3");
 
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipes;
-  recipes[file1] = {};
-  recipes[file2] = {};
-  recipes[file3] = {};
+  recipes[file1.string()] = {};
+  recipes[file2.string()] = {};
+  recipes[file3.string()] = {};
 
   auto result =
       alchemy::pipeline::preflight_validator::checkIfCanApplyRecipes(recipes);
@@ -312,12 +306,11 @@ TEST_F(PreflightValidatorTest, CheckIfCanApplyRecipesFailsIfAnyFileInvalid)
   auto invalidFile = tempDir / "nonexistent.txt";  // doesn't exist
   auto validFile2 = utils::createTestFile(tempDir, "valid2.txt", "content");
 
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipes;
-  recipes[validFile1] = {};
-  recipes[invalidFile] = {};  // this one will fail
-  recipes[validFile2] = {};
+  recipes[validFile1.string()] = {};
+  recipes[invalidFile.string()] = {};  // this one will fail
+  recipes[validFile2.string()] = {};
 
   auto result =
       alchemy::pipeline::preflight_validator::checkIfCanApplyRecipes(recipes);
@@ -328,7 +321,7 @@ TEST_F(PreflightValidatorTest, CheckIfCanApplyRecipesFailsIfAnyFileInvalid)
 
 TEST_F(PreflightValidatorTest, CheckIfCanApplyRecipesPassesForEmptyMap)
 {
-  const std::unordered_map<std::filesystem::path,
+  const std::unordered_map<std::string,
                            std::vector<alchemy::operation::Recipe>>
       Recipes;  // empty
 

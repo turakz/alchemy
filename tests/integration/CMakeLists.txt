@@ -22,12 +22,13 @@ target_link_libraries(integration_tests
     gmock_main
 )
 
+# mock compilers must be built before integration tests can run
+add_dependencies(integration_tests mock_iccarm mock_cl)
+
 target_compile_options(integration_tests
   PRIVATE
     ${ALCHEMY_WARNING_FLAGS}
     $<$<CONFIG:Debug>:${ALCHEMY_DEBUG_FLAGS}>
-    $<$<CONFIG:Release>:${ALCHEMY_RELEASE_FLAGS}>
-    -fdiagnostics-color=always
 )
 
 target_compile_definitions(integration_tests
@@ -59,9 +60,6 @@ set_tests_properties(IntegrationTests PROPERTIES
 
   # label for filtering
   LABELS "integration_tests"
-
-  # ensure proper failure detection on segfaults/crashes
-  WILL_FAIL FALSE
 )
 
 message(STATUS "alchemy::integration tests configured")

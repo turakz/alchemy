@@ -4,7 +4,7 @@
 // std
 #include <cstddef>
 
-#include <filesystem>
+#include <string>
 #include <vector>
 
 // 3rd party
@@ -16,21 +16,19 @@
 namespace alchemy::transmute {
 
 struct TransmutationResult {
-  std::filesystem::path file{};
+  std::string file;
   std::size_t recipesApplied{0};
 };
 
 alchemy::core::Result<alchemy::transmute::TransmutationResult>
 applyRefactor(
-    const std::filesystem::path& sourceFile,
+    const std::string& sourceFile,
     const std::vector<alchemy::operation::detail::RefactorRecipe>& recipes,
-    const std::filesystem::path& buildDir,
     bool dryRun);
 
 alchemy::core::Result<alchemy::transmute::TransmutationResult>
-applyRecipes(const std::filesystem::path& sourceFile,
+applyRecipes(const std::string& sourceFile,
              const std::vector<alchemy::operation::Recipe>& recipes,
-             const std::filesystem::path& buildDir,
              bool dryRun);
 
 }  // namespace alchemy::transmute

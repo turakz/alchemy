@@ -5,13 +5,13 @@
 #define ALCHEMY_TESTS_DATA_INTEGRATION_SALIGN_SALIGN_TEST_FIXTURE_HPP
 
 // std
-#include <chrono>
-
 #include <filesystem>
 
 // 3rd party
 #include <gtest/gtest.h>
 
+// local
+#include "utils.hpp"
 
 namespace alchemy::testing {
 
@@ -21,10 +21,8 @@ protected:
   SetUp() override
   {
     // create temporary test directory
-    tempDir = std::filesystem::temp_directory_path() / "alchemy_salign_test" /
-              std::to_string(
-                  std::chrono::steady_clock::now().time_since_epoch().count());
-    std::filesystem::create_directories(tempDir);
+    tempDir = alchemy::testing::utils::createTempTestDirectory(
+        "alchemy_salign_test");
   }
 
   void

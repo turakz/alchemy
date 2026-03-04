@@ -1,8 +1,8 @@
-# Alchemy Sequence Diagrams (v1.0.0-alpha)
+# Alchemy Sequence Diagrams (v0.1.0-alpha)
 
 High-level execution flows showing component interactions.
 
-**Current state (v1.0.0-alpha)**:
+**Current state (v0.1.0-alpha)**:
 - Operations are plain classes with duck-typed interface: `getRequirements()`, `getName()`, `execute()`
 - `std::visit` calls methods directly on variant alternatives (compile-time dispatch)
 - IAR translator uses query-driver approach for system include paths
@@ -25,21 +25,18 @@ sequenceDiagram
     participant Reporter
 
     %% Phase 1: Setup
-    rect rgb(40, 40, 60)
-        Note over main,Discovery: Phase 1: Initialization
-        main->>App: createFromCli(argc, argv)
-        App->>CLI: parseCli(argc, argv)
-        CLI-->>App: Result<ParsedOptions>
+    Note over main,Discovery: Phase 1: Initialization
+        main->>CLI: parseCli(argc, argv)
+        CLI-->>main: Result<ParsedOptions>
 
+        main->>App: create(ParsedOptions)
         App->>Discovery: discoverFiles(patterns)
         Discovery-->>App: Result<DiscoveryResult>
 
         App-->>main: Result<App>
-    end
 
     %% Phase 2: Execution
-    rect rgb(60, 40, 40)
-        Note over main,Reporter: Phase 2: Pipeline Execution
+    Note over main,Reporter: Phase 2: Pipeline Execution
         main->>App: exec()
 
         App->>Parser: ClangParser::create(sourceFiles, buildDir)
@@ -87,11 +84,9 @@ sequenceDiagram
         end
 
         Pipeline-->>App: Result<PipelineResult{allMetrics, summary}>
-    end
 
     %% Phase 3: Reporting
-    rect rgb(40, 60, 40)
-        Note over App,Reporter: Phase 3: Report Metrics
+    Note over App,Reporter: Phase 3: Report Metrics
 
         alt has metrics
             App->>Reporter: reportMetrics(allMetrics)
@@ -100,14 +95,18 @@ sequenceDiagram
         end
 
         App->>App: Print summary (recipesApplied, filesProcessed)
+
+        alt recipes applied && !dryRun
+            App->>App: Print warning (inline comments may have shifted)
+        end
+
         App-->>main: exitCode
-    end
 ```
 
 **Key Phases**:
-1. **Initialization** (blue) - CLI parsing, file discovery, AppConfig creation
-2. **Pipeline Execution** (red) - Parser creation, pipeline stages (parse → execute → transmute)
-3. **Report Metrics** (green) - App reports metrics (I/O responsibility)
+1. **Initialization** - CLI parsing, file discovery, AppConfig creation
+2. **Pipeline Execution** - Parser creation, pipeline stages (parse → execute → transmute)
+3. **Report Metrics** - App reports metrics (I/O responsibility)
 
 **Architecture Properties**:
 - Parser abstraction isolates LLVM from pipeline (language-agnostic interface)
@@ -119,7 +118,7 @@ sequenceDiagram
 
 ## Parser Creation & Lifecycle
 
-**Focus**: Factory pattern creates parser with compiler translator support
+**Focus**: Factory pattern creates parser with compiler translator support, header→TU pairing
 
 ```mermaid
 sequenceDiagram
@@ -132,57 +131,77 @@ sequenceDiagram
 
     App->>ClangParser: ClangParser::create(sourceFiles, buildDir)
 
-    Note over ClangParser: If buildDir provided, use for compile_commands.json
-
-    rect rgb(60, 40, 60)
-        Note over ClangParser,Adapter: Compiler Detection & Translation
+    Note over ClangParser,Adapter: Compiler Detection & Translation
         ClangParser->>CompDBFactory: fromBuildDir(buildDir)
         CompDBFactory->>CompDBFactory: loadFromDirectory(compile_commands.json)
 
         alt IAR detected
-            CompDBFactory->>Translator: IARDbTranslator::translateAll(db)
+            CompDBFactory->>Translator: IarDbTranslator::translateAll(db)
             Note over Translator: Query-driver: queries compiler for system includes
             Translator-->>CompDBFactory: vector<CompileCommand>
             CompDBFactory->>Adapter: ClangCompilationDatabaseAdapter(translatedCommands)
             CompDBFactory->>LLVM: inferMissingCompileCommands(adapter)
             CompDBFactory-->>ClangParser: Result<CompilationDatabaseInfo{db, "IAR"}>
         else MSVC detected
-            CompDBFactory->>Translator: MSVCDbTranslator::translateAll(db)
+            CompDBFactory->>Translator: MsvcDbTranslator::translateAll(db)
             Translator-->>CompDBFactory: vector<CompileCommand>
             CompDBFactory->>Adapter: ClangCompilationDatabaseAdapter(translatedCommands)
             CompDBFactory->>LLVM: inferMissingCompileCommands(adapter)
             CompDBFactory-->>ClangParser: Result<CompilationDatabaseInfo{db, "MSVC"}>
-        else GCC/Clang
+        else GCC detected
+            CompDBFactory->>Translator: GccDbTranslator::translateAll(db)
+            Note over Translator: Query-driver: queries compiler for system includes + target
+            Translator-->>CompDBFactory: vector<CompileCommand>
+            CompDBFactory->>Adapter: ClangCompilationDatabaseAdapter(translatedCommands)
+            CompDBFactory->>LLVM: inferMissingCompileCommands(adapter)
+            CompDBFactory-->>ClangParser: Result<CompilationDatabaseInfo{db, "GCC"}>
+        else Clang
             CompDBFactory->>Adapter: ClangCompilationDatabaseAdapter(db->getAllCommands())
             CompDBFactory->>LLVM: inferMissingCompileCommands(adapter)
-            CompDBFactory-->>ClangParser: Result<CompilationDatabaseInfo{db, "GCC/Clang"}>
+            CompDBFactory-->>ClangParser: Result<CompilationDatabaseInfo{db, "Clang"}>
         end
-    end
 
-    ClangParser->>LLVM: create ClangTool(dbInfo.database, sourceFiles)
-    alt Tool creation fails
-        LLVM-->>ClangParser: Error
-        ClangParser-->>App: Result::failure()
-    else Success
-        LLVM-->>ClangParser: unique_ptr<ClangTool>
-    end
+    Note over ClangParser,LLVM: Header→TU Pairing
+        ClangParser->>ClangParser: Build stem index from DB files
+        loop for each sourceFile
+            alt Is header (.h/.hpp)
+                alt Basename matches TU in DB
+                    ClangParser->>ClangParser: pairedTUs.insert(dbTU)
+                else No matching TU
+                    ClangParser->>ClangParser: headerOnlyFiles.push_back(header)
+                end
+            else Is TU (.c/.cpp)
+                ClangParser->>ClangParser: pairedTUs.insert(sourceFile)
+            end
+        end
+        ClangParser->>ClangParser: Store targetHeaders (absolute paths)
 
-    Note over ClangParser: CRITICAL: Store as members
-    ClangParser->>ClangParser: m_tool, m_compilationDb, m_compilerType
+    ClangParser->>LLVM: create ClangTool(db, pairedTUs + headerOnlyFiles)
 
+    Note over ClangParser,LLVM: Argument Adjusters
+        ClangParser->>LLVM: appendArgumentsAdjuster (include path augmentation for inferred files)
+        ClangParser->>LLVM: appendArgumentsAdjuster (std-type preamble for header-only files)
+
+    Note over ClangParser: Store members: m_tool, m_compilationDb, m_compilerType, m_targetHeaders
     ClangParser-->>App: Result<unique_ptr<ClangParser>>
 ```
 
 **Key Points**:
 - `CompilationDatabaseFactory` detects compiler from flags in `compile_commands.json`
-- Uses stateless translators (IAR/MSVC) to convert commands to Clang-compatible format
+- Uses stateless translators (GCC/IAR/MSVC) to convert commands to Clang-compatible format
 - Stores translated commands in `ClangCompilationDatabaseAdapter`
-- Wraps adapter with `inferMissingCompileCommands()` for header file support (applies to all compilers)
-- IAR translator uses query-driver approach (queries actual compiler for system include paths)
-- MSVC translator converts flag syntax (`/I` → `-I`, `/D` → `-D`)
-- Returns `CompilationDatabaseInfo{database, compilerType}`
-- ClangParser stores `ClangTool`, `CompilationDatabase`, and `compilerType` as members
-- Parser exposes compiler type via `getName()` for debugging/testing
+- Wraps adapter with `inferMissingCompileCommands()` for header-only file support
+
+**Header→TU Pairing**:
+- User-provided headers are paired with TUs from the DB by basename (e.g., `config.h` → `config.c`)
+- Paired TUs are passed to ClangTool instead of bare headers — clang gets full include chain context
+- Headers with no matching TU are parsed directly with inferred commands
+- Source files already TUs (`.c`/`.cpp`) are parsed directly
+- `m_targetHeaders` stores user-requested file paths for post-filtering in `parse()`
+
+**Argument Adjusters**:
+1. **Include path augmentation** — injects union of all `-I` paths for inferred (header-only) files
+2. **Std-type preamble** — injects `-include stddef.h/stdint.h/stdbool.h` (resolved to full paths) for header-only files that may use std types without `#include`-ing them
 
 ---
 
@@ -193,7 +212,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant Factory as CompilationDatabaseFactory
-    participant Translator as IARDbTranslator
+    participant Translator as IarDbTranslator
     participant JSONDb as JSONCompilationDatabase
     participant Compiler as iccarm (IAR Compiler)
 
@@ -205,7 +224,7 @@ sequenceDiagram
     JSONDb-->>Translator: vector<CompileCommand>
     Translator->>Translator: Extract compiler path (first cmd.CommandLine[0])
     Translator->>Translator: Extract arch flags (--cpu=Cortex-M4, --fpu=...)
-    Translator-->>Translator: IARQueryConfig{compilerPath, archFlags}
+    Translator-->>Translator: IarQueryConfig{compilerPath, archFlags}
 
     Note over Translator: Step 2: Query compiler for system includes
     Translator->>Translator: querySystemIncludes(query)
@@ -261,6 +280,89 @@ sequenceDiagram
 - **Compatibility defines**: `__intrinsic=`, `__packed=__attribute__((packed))`, etc.
 - IAR uses GCC-compatible syntax for `-I`, `-D`, `-U` (no translation needed)
 - Returns `vector<CompileCommand>` with **real** include paths from actual compiler
+
+---
+
+## GCC Translator - Query-Driver Flow
+
+**Focus**: GCC translator queries compiler for system includes and target triple, filters GCC-specific flags, injects ABI-compatibility flags
+
+```mermaid
+sequenceDiagram
+    participant Factory as CompilationDatabaseFactory
+    participant Translator as GccDbTranslator
+    participant JSONDb as JSONCompilationDatabase
+    participant Compiler as gcc (GCC Compiler)
+
+    Factory->>Translator: extractQueryConfig(db)
+    Note over Translator: Step 1: Extract query config
+    Translator->>JSONDb: getAllCompileCommands()
+    JSONDb-->>Translator: vector<CompileCommand>
+    Translator->>Translator: Extract compiler path (CommandLine[0])
+    Translator->>Translator: Infer language from binary name (c / c++)
+    Translator-->>Factory: Result<GccQueryConfig{compilerPath, language}>
+
+    Note over Translator: Step 2: Query system includes
+    Factory->>Translator: querySystemIncludes(query)
+    Translator->>Compiler: popen("gcc -E -Wp,-v -x c /dev/null 2>&1")
+    Compiler-->>Translator: stdout/stderr with include paths
+    Translator->>Translator: parseSystemIncludes(output)
+    Note over Translator: Parse: #include <...> search starts here:<br/>/usr/arm-none-eabi/include<br/>/usr/lib/gcc/arm-none-eabi/12/include<br/>End of search list.
+    Translator-->>Factory: Result<vector<string>> sysIncludes
+
+    Note over Translator: Step 3: Query target triple
+    Factory->>Translator: queryTargetTriple(query)
+    Translator->>Compiler: popen("gcc -dumpmachine")
+    Compiler-->>Translator: "arm-none-eabi"
+    Translator->>Translator: validateTargetTriple(triple)
+    Note over Translator: Extract arch (before first '-')<br/>Check against KnownArchitectures set<br/>Warn if unrecognized (non-fatal)
+    Translator-->>Factory: Result<string> targetTriple
+
+    Factory->>Factory: GccDbTranslator(sysIncludes, targetTriple)
+
+    Note over Translator: Step 4: Translate commands
+    loop for each GCC command
+        Factory->>Translator: translateCommand(gccCmd)
+
+        Note over Translator: Build Clang command
+        Translator->>Translator: Start with "clang"
+        Translator->>Translator: Add -target <triple>
+
+        alt ARM EABI target (arm/thumb-*-none-eabi*)
+            Translator->>Translator: Add -fshort-enums (ABI compat)
+        end
+
+        loop for each queried include path
+            Translator->>Translator: Add -isystem <path>
+        end
+
+        loop for each flag in GCC command
+            alt --driver-mode= flag
+                Note over Translator: Strip (alchemy handles translation)
+            else GCC-only flag OR resource dir suppressor
+                Note over Translator: Strip (-nostdinc, -Werror, --specs=, etc.)
+            else GCC warning with clang equivalent
+                Translator->>Translator: Translate (-Wmaybe-uninitialized -> -Wconditional-uninitialized)
+            else Standard flag (-I, -D, -O, -march, source file)
+                Translator->>Translator: Keep flag unchanged
+            end
+        end
+
+        Translator->>Translator: Add -Wno-unknown-warning-option (safety net)
+        Translator->>Translator: Add -fsyntax-only
+
+        Translator-->>Factory: CompileCommand (Clang-compatible)
+    end
+```
+
+**Key Points**:
+- **Query-driver**: Executes actual GCC compiler for system includes (`-E -Wp,-v`) and target triple (`-dumpmachine`)
+- **Non-fatal failures**: System include and target triple queries warn on failure but don't block translation
+- **Architecture validation**: Checks extracted arch against known set (arm, thumb, aarch64, x86_64, riscv32/64, avr, msp430), warns if unrecognized
+- **ARM EABI `-fshort-enums`**: GCC implicitly enables packed enums for `arm-*-none-eabi*` / `thumb-*-none-eabi*` targets; clang doesn't, so it's injected explicitly for `sizeof()` correctness
+- **Resource dir suppressors**: `-nostdinc`, `-nostdinc++`, `-nobuiltininc`, `-nostdlibinc` are stripped to prevent suppressing clang's resource directory (needed for target-correct `stdint.h`)
+- **Flag translation**: 6 GCC warning flags have clang equivalents (e.g., `-Wmaybe-uninitialized` → `-Wconditional-uninitialized`)
+- **Blocklist approach**: GCC-specific flags filtered by exact match set + prefix matching (`-fdump-*`, `-fipa-*`, `-Werror=*`)
 
 ---
 
@@ -377,8 +479,14 @@ sequenceDiagram
         Operation->>Analyzer: analyze(structDef)
 
         alt Optimization possible
-            Analyzer-->>Operation: RefactorRecipe{file, offset, length, text}
-            Note over Operation: Auto-wrapped in Recipe variant
+            Note over Analyzer: Sort fields by alignment (desc)
+            Note over Analyzer: Compare original vs optimized order
+            alt Swap involves non-reorderable field
+                Analyzer-->>Operation: empty (bail out — bitfield/anonymous union)
+            else All swapped fields reorderable
+                Analyzer-->>Operation: RefactorRecipe{file, offset, length, text}
+                Note over Operation: text = sourceTypeName + fieldName + arraySuffix + trailingComment
+            end
         else Already optimal
             Analyzer-->>Operation: empty
         end

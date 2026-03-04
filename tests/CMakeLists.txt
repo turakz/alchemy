@@ -1,3 +1,18 @@
+# fetch GoogleTest from GitHub (v1.14.0)
+include(FetchContent)
+FetchContent_Declare(
+  googletest
+  GIT_REPOSITORY https://github.com/google/googletest.git
+  GIT_TAG        v1.14.0
+)
+
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+set(BUILD_GMOCK ON CACHE BOOL "" FORCE)
+set(BUILD_GTEST ON CACHE BOOL "" FORCE)
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(googletest)
+
 # shared test utilities library
 add_library(test_utils STATIC
   utils.cpp
@@ -14,39 +29,18 @@ target_link_libraries(test_utils
     alchemy_lib
 )
 
-# tests/CMakeLists.txt
-message(STATUS "alchemy::tests::configuring...")
+# inject absolute paths to mock compiler binaries so tests work from any CWD
+target_compile_definitions(test_utils
+  PUBLIC
+    MOCK_ICCARM_PATH="$<TARGET_FILE:mock_iccarm>"
+    MOCK_CL_PATH="$<TARGET_FILE:mock_cl>"
+)
 
-# mock compilers
-if(IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data/mock_compilers)
-message(STATUS "alchemy::found mock compilers for testing, adding subdirectory")
-  add_subdirectory(data/mock_compilers)
-endif()
+message(STATUS "alchemy::configuring tests...")
 
-# unit tests
-if(IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/unit)
-  message(STATUS "alchemy::found unit tests directory, adding subdirectory")
-  add_subdirectory(unit)
-else()
-  message(STATUS "alchemy::no unit tests directory found")
-endif()
+add_subdirectory(data/mock_compilers)
+add_subdirectory(unit)
+add_subdirectory(integration)
+add_subdirectory(performance)
 
-# integration tests
-if(IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/integration)
-  message(STATUS "alchemy::found integration tests directory, adding subdirectory")
-  add_subdirectory(integration)
-else()
-  message(STATUS "alchemy::no integration tests directory found")
-endif()
-
-message(STATUS "alchemy::tests::configuration complete")
-
-# performance tests
-if(IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/performance)
-  message(STATUS "alchemy::found performance tests directory, adding subdirectory")
-  add_subdirectory(performance)
-else()
-  message(STATUS "alchemy::no performance tests directory found")
-endif()
-
-message(STATUS "alchemy::tests::configuration complete")
+message(STATUS "alchemy::tests configured")

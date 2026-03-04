@@ -25,11 +25,6 @@ public:
   {
     return "ClangStructParser";
   };
-  std::vector<std::string>
-  getSupportedExtensions() const override
-  {
-    return {".c", ".h"};
-  }
 
   const std::vector<parser::artifacts::StructDef>&
   getParsedStructs() const

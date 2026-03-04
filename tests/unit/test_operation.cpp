@@ -412,8 +412,12 @@ TEST_F(OperationTest, SAlign_Analyze_DetectsOverlappingRecipes)
   // replacements
   const std::vector<alchemy::parser::artifacts::FieldDef> Fields = {
       utils::createFieldDef(0, 20, "char", "a", 1, 1),  // offset 0, len 20
-      utils::createFieldDef(
-          10, 20, "double", "b", 8, 8),  // offset 10, len 20 (overlaps!)
+      utils::createFieldDef(10,
+                            20,
+                            "double",
+                            "b",
+                            8,
+                            8),  // offset 10, len 20 (overlaps!)
       utils::createFieldDef(30, 10, "int", "c", 4, 4)  // offset 30, len 10
   };
 
@@ -508,6 +512,231 @@ TEST_F(OperationTest, SAlign_ComputeMetrics_IncludesStructName)
   ASSERT_EQ(metrics.size(), 1);
   ASSERT_EQ(metrics[0].structName, "MyStruct")
       << "alchemy::testing::unit::salign::metrics include struct name";
+}
+
+TEST_F(OperationTest, SAlign_Analyze_BailsOutOnNonReorderableFieldInSwapZone)
+{
+  const alchemy::operation::refactoring::StructAlignmentOperation Op;
+  const std::filesystem::path TestFile = "test.h";
+
+  // suboptimal: char(1), uint32_t(4, non-reorderable), double(8)
+  // optimal sort would produce: double, char, uint32_t
+  // but uint32_t is non-reorderable, so at position 1 the swap
+  // original=uint32_t vs optimized=char triggers bailout
+  std::vector<alchemy::parser::artifacts::FieldDef> fields = {
+      utils::createFieldDef(0, 12, "char", "small", 1, 1),
+      utils::createFieldDef(12, 14, "uint32_t", "locked", 4, 4, false, false),
+      utils::createFieldDef(26, 14, "double", "big", 8, 8)};
+
+  auto structDef =
+      utils::createStructDef("NonReorderableStruct", TestFile, fields, 8);
+  auto analysis = Op.analyzeStruct(structDef);
+
+  ASSERT_TRUE(analysis.recipes.empty())
+      << "non-reorderable field in swap zone should clear all recipes";
+  ASSERT_EQ(analysis.metrics.possibleSavings, 0)
+      << "savings should be zeroed on non-reorderable bailout";
+  ASSERT_DOUBLE_EQ(analysis.metrics.savingsPercent, 0.0)
+      << "savings percent should be zeroed on non-reorderable bailout";
+}
+
+TEST_F(OperationTest, SAlign_Analyze_SkipsPackedStruct)
+{
+  const alchemy::operation::refactoring::StructAlignmentOperation Op;
+  const std::filesystem::path TestFile = "test.h";
+
+  // suboptimal layout: char(1), double(8) — would normally be reordered
+  // but the struct is #pragma packed, so it should be skipped entirely
+  std::vector<alchemy::parser::artifacts::FieldDef> fields = {
+      utils::createFieldDef(0, 12, "char", "small", 1, 1),
+      utils::createFieldDef(12, 14, "double", "big", 8, 8)};
+
+  auto structDef = utils::createStructDef("PackedStruct", TestFile, fields, 8);
+  structDef.isPacked = true;
+
+  auto analysis = Op.analyzeStruct(structDef);
+
+  ASSERT_TRUE(analysis.recipes.empty())
+      << "packed struct should produce no recipes";
+  ASSERT_EQ(analysis.metrics.possibleSavings, 0)
+      << "packed struct should report zero savings";
+  ASSERT_DOUBLE_EQ(analysis.metrics.savingsPercent, 0.0)
+      << "packed struct should report zero savings percent";
+  ASSERT_TRUE(analysis.metrics.skipped)
+      << "packed struct should be marked as skipped";
+
+  // phase 1 metrics should still be populated
+  ASSERT_EQ(analysis.metrics.structName, "PackedStruct");
+  ASSERT_EQ(analysis.metrics.sourceFile, TestFile);
+  ASSERT_GT(analysis.metrics.naturalTotalSize, 0)
+      << "current layout metrics should be populated even for skipped structs";
+}
+
+TEST_F(OperationTest, SAlign_Analyze_DoesNotSkipUnpackedStruct)
+{
+  const alchemy::operation::refactoring::StructAlignmentOperation Op;
+  const std::filesystem::path TestFile = "test.h";
+
+  // suboptimal: char(1) + 7 pad + double(8) = 16 → optimal: double(8) +
+  // char(1) + 7 trailing = 16... actually same size. Use three fields.
+  // char(1) + 3 pad + int(4) + double(8) = 16 → double(8) + int(4) + char(1)
+  // + 3 trail = 16
+  // Need a layout where reordering actually saves:
+  // char(1) + 7 pad + double(8) + char(1) + 3 pad + int(4) = 24
+  // → double(8) + int(4) + char(1) + char(1) + 2 pad = 16
+  std::vector<alchemy::parser::artifacts::FieldDef> fields = {
+      utils::createFieldDef(0, 12, "char", "a", 1, 1),
+      utils::createFieldDef(12, 14, "double", "b", 8, 8),
+      utils::createFieldDef(26, 12, "char", "c", 1, 1),
+      utils::createFieldDef(38, 14, "int", "d", 4, 4)};
+
+  auto structDef =
+      utils::createStructDef("UnpackedStruct", TestFile, fields, 8);
+
+  auto analysis = Op.analyzeStruct(structDef);
+
+  ASSERT_FALSE(analysis.metrics.skipped)
+      << "unpacked struct should not be marked as skipped";
+}
+
+// ============================================================================
+// FEATURE: SAlign - buildReplacementText() comment preservation
+// ============================================================================
+
+TEST_F(OperationTest, SAlign_BuildReplacementText_NoPrecedingComment)
+{
+  auto field = utils::createFieldDef(0, 16, "uint32_t", "count", 4, 4);
+
+  const std::string Result =
+      alchemy::operation::refactoring::detail::buildReplacementText(field);
+
+  ASSERT_EQ(Result, "uint32_t count;")
+      << "field without preceding comment produces just type + name";
+}
+
+TEST_F(OperationTest, SAlign_BuildReplacementText_IncludesPrecedingComment)
+{
+  auto field = utils::createFieldDef(0, 40, "uint32_t", "count", 4, 4);
+  field.precedingComment = "/// number of items";
+  field.commentFieldGap = "\n  ";
+
+  const std::string Result =
+      alchemy::operation::refactoring::detail::buildReplacementText(field);
+
+  ASSERT_EQ(Result, "/// number of items\n  uint32_t count;")
+      << "preceding comment + gap + field declaration";
+}
+
+TEST_F(OperationTest, SAlign_BuildReplacementText_PrecedingAndTrailingComment)
+{
+  auto field = utils::createFieldDef(0, 60, "uint32_t", "count", 4, 4);
+  field.precedingComment = "/// number of items";
+  field.commentFieldGap = "\n  ";
+  field.trailingComment = "// must be > 0";
+
+  const std::string Result =
+      alchemy::operation::refactoring::detail::buildReplacementText(field);
+
+  ASSERT_EQ(Result, "/// number of items\n  uint32_t count; // must be > 0")
+      << "preceding comment + field + trailing comment";
+}
+
+TEST_F(OperationTest, SAlign_BuildReplacementText_MultiLinePrecedingComment)
+{
+  auto field = utils::createFieldDef(0, 60, "double", "value", 8, 8);
+  field.precedingComment = "/// first line\n  /// second line";
+  field.commentFieldGap = "\n  ";
+
+  const std::string Result =
+      alchemy::operation::refactoring::detail::buildReplacementText(field);
+
+  ASSERT_EQ(Result, "/// first line\n  /// second line\n  double value;")
+      << "multi-line preceding comment preserved";
+}
+
+TEST_F(OperationTest, SAlign_Analyze_ReplacementTextIncludesPrecedingComment)
+{
+  const alchemy::operation::refactoring::StructAlignmentOperation Op;
+  const std::filesystem::path TestFile = "test.h";
+
+  // suboptimal: char(1) + double(8) + char(1) + int(4) = 24 bytes
+  // optimal:    double(8) + int(4) + char(1) + char(1) = 16 bytes (saves 8)
+  auto fieldA = utils::createFieldDef(0, 12, "char", "a", 1, 1);
+  fieldA.precedingComment = "// comment for a";
+  fieldA.commentFieldGap = "\n  ";
+
+  auto fieldB = utils::createFieldDef(30, 14, "double", "b", 8, 8);
+  fieldB.precedingComment = "// comment for b";
+  fieldB.commentFieldGap = "\n  ";
+
+  auto fieldC = utils::createFieldDef(60, 12, "char", "c", 1, 1);
+  auto fieldD = utils::createFieldDef(80, 10, "int", "d", 4, 4);
+
+  const std::vector<alchemy::parser::artifacts::FieldDef> Fields = {
+      fieldA, fieldB, fieldC, fieldD};
+  auto structDef = utils::createStructDef("CommentStruct", TestFile, Fields, 8);
+  auto analysis = Op.analyzeStruct(structDef);
+
+  ASSERT_FALSE(analysis.recipes.empty())
+      << "should generate recipes for suboptimal struct";
+
+  // verify at least one recipe includes a preceding comment
+  bool foundCommentInRecipe = false;
+  for (const auto& recipe : analysis.recipes)
+  {
+    if (recipe.replacementText.find("// comment for") != std::string::npos)
+    {
+      foundCommentInRecipe = true;
+      break;
+    }
+  }
+  ASSERT_TRUE(foundCommentInRecipe)
+      << "recipe replacement text should include preceding comment";
+}
+
+TEST_F(OperationTest, SAlign_BuildReplacementText_ArrayFieldWithSuffix)
+{
+  auto field =
+      utils::createFieldDef(0, 30, "uint8_t[11]", "SerialNumber", 11, 1);
+  field.sourceTypeName = "uint8_t";
+  field.sourceArraySuffix = "[SENSOR_SERIAL_NUMBER_LENGTH]";
+
+  const std::string Result =
+      alchemy::operation::refactoring::detail::buildReplacementText(field);
+
+  ASSERT_EQ(Result, "uint8_t SerialNumber[SENSOR_SERIAL_NUMBER_LENGTH];")
+      << "array suffix should preserve macro name from source";
+}
+
+TEST_F(OperationTest, SAlign_BuildReplacementText_MultiDimArrayWithSuffix)
+{
+  auto field =
+      utils::createFieldDef(0, 40, "char[3][76]", "RepeatedPrints", 228, 1);
+  field.sourceTypeName = "char";
+  field.sourceArraySuffix =
+      "[DEBUGOUTPUTTASK_MAX_REPEATED_COMMANDS][DEBUGCOMMAND_MAX_MESSAGE_SIZE]";
+
+  const std::string Result =
+      alchemy::operation::refactoring::detail::buildReplacementText(field);
+
+  ASSERT_EQ(Result,
+            "char RepeatedPrints"
+            "[DEBUGOUTPUTTASK_MAX_REPEATED_COMMANDS]"
+            "[DEBUGCOMMAND_MAX_MESSAGE_SIZE];")
+      << "multi-dimensional array suffix should preserve macro names";
+}
+
+TEST_F(OperationTest, SAlign_BuildReplacementText_NonArrayFieldEmptySuffix)
+{
+  auto field = utils::createFieldDef(0, 16, "int32_t", "count", 4, 4);
+  field.sourceTypeName = "int32_t";
+  // sourceArraySuffix defaults to empty
+
+  const std::string Result =
+      alchemy::operation::refactoring::detail::buildReplacementText(field);
+
+  ASSERT_EQ(Result, "int32_t count;")
+      << "non-array field produces no array suffix";
 }
 
 }  // namespace alchemy::testing

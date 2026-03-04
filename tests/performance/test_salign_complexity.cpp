@@ -28,11 +28,8 @@ protected:
   SetUp() override
   {
     // create temporary test directory
-    tempDir = std::filesystem::temp_directory_path() /
-              "alchemy_salign_complexity_test" /
-              std::to_string(
-                  std::chrono::steady_clock::now().time_since_epoch().count());
-    std::filesystem::create_directories(tempDir);
+    tempDir = alchemy::testing::utils::createTempTestDirectory(
+        "alchemy_salign_complexity_test");
   }
 
   void
@@ -83,9 +80,11 @@ protected:
 
     // Header guards
     std::string guardName = filename;
-    std::replace(guardName.begin(), guardName.end(), '.', '_');
-    std::transform(
-        guardName.begin(), guardName.end(), guardName.begin(), ::toupper);
+    std::replace(std::begin(guardName), std::end(guardName), '.', '_');
+    std::transform(std::begin(guardName),
+                   std::end(guardName),
+                   std::begin(guardName),
+                   ::toupper);
 
     content << "#ifndef " << guardName << "\n";
     content << "#define " << guardName << "\n\n";
@@ -150,7 +149,7 @@ TEST_F(SalignComplexityPerformanceTest, SimpleStructs_2Fields)
             << duration.count() << "ms" << '\n';
 }
 
-// test: baseline complexity (4 fields - matches original baseline)
+// test: baseline complexity (4 fields: matches original baseline)
 TEST_F(SalignComplexityPerformanceTest, BaselineStructs_4Fields)
 {
   const std::size_t FileCount = 5;

@@ -1,8 +1,8 @@
-# Struct Alignment Metrics Enhancement
+# Struct Alignment Metrics Enhancement — STATUS: PROPOSAL, NOT YET IMPLEMENTED
 
 **Document Version**: 1.0
 **Created**: 2025-01-23
-**Status**: Design Proposal
+**Status**: Proposal — not yet implemented
 
 ---
 
@@ -310,9 +310,16 @@ struct SAlignMetrics {
 
 ## Tier 1: Essential Cache Metrics (High Value, Easy to Compute)
 
-### 1. Cache Line Utilization
+### 1. Cache Lines Per Struct (CLPS)
 
-**What it measures**: How efficiently structs pack into cache lines.
+**What it measures**: How many cache lines a single struct instance spans.
+
+> **Note (2026-03)**: The original proposal used SPCL (Structs Per Cache Line = `floor(64 / size)`).
+> SPCL was replaced with CLPS (`ceil(size / 64)`), but CLPS was also dropped from the
+> implementation as it is redundant with struct size (`ceil(size / 64)` communicates nothing
+> that `size` doesn't already). The current implementation retains only **cache utilization**
+> and **cache waste** as array-packing metrics (SPCL-based internally). This section of the
+> proposal should be revisited if a cache-line-aware score metric is still desired.
 
 **Calculation**:
 ```cpp
@@ -321,17 +328,19 @@ struct CacheLineMetrics {
     size_t cacheLineSize = 64;  // Configurable per architecture
 
     // Computed values
-    double structsPerCacheLine;      // floor(64 / struct_size)
-    double cacheLineUtilization;     // Percentage of cache line used
-    size_t wastedBytesPerLine;       // 64 - (structs_per_line * struct_size)
+    double cacheLinesPerStruct;      // ceil(struct_size / 64)
+    double cacheLineUtilization;     // Percentage of cache line used (array packing)
+    size_t wastedBytesPerLine;       // 64 - (floor(64/size) * struct_size)
 };
 
 // Example calculation
 CacheLineMetrics calc(size_t structSize) {
     CacheLineMetrics m;
     m.structSize = structSize;
-    m.structsPerCacheLine = std::floor(64.0 / structSize);
-    size_t bytesUsed = m.structsPerCacheLine * structSize;
+    m.cacheLinesPerStruct = std::ceil((double)structSize / 64.0);
+    // array packing metrics (SPCL-based)
+    double spcl = std::floor(64.0 / structSize);
+    size_t bytesUsed = (size_t)spcl * structSize;
     m.wastedBytesPerLine = 64 - bytesUsed;
     m.cacheLineUtilization = (bytesUsed / 64.0) * 100.0;
     return m;
@@ -342,22 +351,22 @@ CacheLineMetrics calc(size_t structSize) {
 ```
 Before optimization:
   Struct size: 24 bytes
-  Structs per cache line: 2 (2.67 rounded down)
+  Cache lines per struct: 1
   Cache line utilization: 75.0% (48 bytes used, 16 bytes wasted)
 
 After optimization:
   Struct size: 16 bytes
-  Structs per cache line: 4
+  Cache lines per struct: 1
   Cache line utilization: 100.0% (64 bytes used, 0 bytes wasted)
 
 Improvement: +25% cache line utilization
 ```
 
 **Interpretation guide**:
-- 100% = Excellent (perfect packing, power-of-2 struct size that divides 64)
-- 87-99% = Good (minor waste)
-- 75-86% = Fair (significant waste, consider further optimization)
-- <75% = Poor (struct size doesn't pack well, major cache line waste)
+- 1 line = Excellent (struct fits entirely within one cache line)
+- 2 lines = Good (one cache line boundary crossing)
+- 3-4 lines = Fair (multiple crossings, consider optimization)
+- 5+ lines = Poor (large struct, consider Struct-of-Arrays for hot paths)
 
 ---
 
@@ -377,7 +386,7 @@ struct MemoryDensityMetrics {
 // Example
 MemoryDensityMetrics calc(const std::vector<FieldDef>& fields, size_t structSize) {
     MemoryDensityMetrics m;
-    m.totalFieldBytes = std::accumulate(fields.begin(), fields.end(), 0,
+    m.totalFieldBytes = std::accumulate(std::begin(fields), std::end(fields), 0,
         [](size_t sum, const FieldDef& f) { return sum + f.size; });
     m.totalStructBytes = structSize;
     m.paddingBytes = structSize - m.totalFieldBytes;
@@ -860,7 +869,7 @@ struct CacheLineMetrics {
     size_t structSize;
     size_t cacheLineSize = 64;
 
-    double structsPerCacheLine;
+    double cacheLinesPerStruct;
     double cacheLineUtilization;
     size_t wastedBytesPerLine;
 };

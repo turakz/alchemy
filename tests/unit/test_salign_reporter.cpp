@@ -4,6 +4,7 @@
 #include <cstddef>
 
 #include <algorithm>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -30,7 +31,7 @@ protected:
                 std::size_t optimizedWaste)
   {
     alchemy::metrics::detail::SAlignMetrics m;
-    m.sourceFile = std::filesystem::path(fileName);
+    m.sourceFile = fileName;
     m.structName = structName;
     m.naturalTotalSize = naturalSize;
     m.optimizedSize = optimizedSize;
@@ -42,8 +43,6 @@ protected:
     m.naturalAlignment = 8;
     m.currentCacheUtil = 50.0;
     m.optimizedCacheUtil = 75.0;
-    m.currentSpclScore = 2.0;
-    m.optimizedSpclScore = 3.0;
     return m;
   }
 };
@@ -57,7 +56,7 @@ TEST_F(SAlignReporterTest, FormatPercentageChangeHandlesDecrease)
   auto result =
       alchemy::metrics::reporter::detail::formatPercentageChange(100, 80);
 
-  ASSERT_EQ(result, "-20 bytes (-20.0%)");
+  ASSERT_EQ(result, "\033[92m-20 bytes (-20.0%)\033[0m");
 }
 
 TEST_F(SAlignReporterTest, FormatPercentageChangeHandlesIncrease)
@@ -65,7 +64,7 @@ TEST_F(SAlignReporterTest, FormatPercentageChangeHandlesIncrease)
   auto result =
       alchemy::metrics::reporter::detail::formatPercentageChange(80, 100);
 
-  ASSERT_EQ(result, "+20 bytes (+25.0%)");
+  ASSERT_EQ(result, "\033[35m+20 bytes (+25.0%)\033[0m");
 }
 
 TEST_F(SAlignReporterTest, FormatPercentageChangeHandlesSame)
@@ -73,7 +72,7 @@ TEST_F(SAlignReporterTest, FormatPercentageChangeHandlesSame)
   auto result =
       alchemy::metrics::reporter::detail::formatPercentageChange(100, 100);
 
-  ASSERT_EQ(result, "(same)");
+  ASSERT_EQ(result, "\033[35m(same)\033[0m");
 }
 
 TEST_F(SAlignReporterTest, FormatPercentageChangeHandlesZeroCurrent)
@@ -81,7 +80,7 @@ TEST_F(SAlignReporterTest, FormatPercentageChangeHandlesZeroCurrent)
   auto result =
       alchemy::metrics::reporter::detail::formatPercentageChange(0, 50);
 
-  ASSERT_EQ(result, "(n/a)");
+  ASSERT_EQ(result, "\033[35m(n/a)\033[0m");
 }
 
 // ============================================================================
@@ -93,7 +92,7 @@ TEST_F(SAlignReporterTest, FormatPaddingImprovementHandlesDecrease)
   auto result =
       alchemy::metrics::reporter::detail::formatPaddingImprovement(20, 10);
 
-  ASSERT_EQ(result, "-10 bytes (-50.0%)");
+  ASSERT_EQ(result, "\033[92m-10 bytes (-50.0%)\033[0m");
 }
 
 TEST_F(SAlignReporterTest, FormatPaddingImprovementHandlesIncrease)
@@ -101,7 +100,7 @@ TEST_F(SAlignReporterTest, FormatPaddingImprovementHandlesIncrease)
   auto result =
       alchemy::metrics::reporter::detail::formatPaddingImprovement(10, 20);
 
-  ASSERT_EQ(result, "+10 bytes (+100.0%)");
+  ASSERT_EQ(result, "\033[35m+10 bytes (+100.0%)\033[0m");
 }
 
 TEST_F(SAlignReporterTest, FormatPaddingImprovementHandlesSame)
@@ -109,7 +108,7 @@ TEST_F(SAlignReporterTest, FormatPaddingImprovementHandlesSame)
   auto result =
       alchemy::metrics::reporter::detail::formatPaddingImprovement(15, 15);
 
-  ASSERT_EQ(result, "(same)");
+  ASSERT_EQ(result, "\033[35m(same)\033[0m");
 }
 
 TEST_F(SAlignReporterTest, FormatPaddingImprovementHandlesZeroCurrent)
@@ -117,7 +116,7 @@ TEST_F(SAlignReporterTest, FormatPaddingImprovementHandlesZeroCurrent)
   auto result =
       alchemy::metrics::reporter::detail::formatPaddingImprovement(0, 10);
 
-  ASSERT_EQ(result, "+10 bytes (+0.0%)");
+  ASSERT_EQ(result, "\033[35m+10 bytes (+0.0%)\033[0m");
 }
 
 // ============================================================================
@@ -131,8 +130,12 @@ TEST_F(SAlignReporterTest, ExtractOptimizableFiltersZeroSavings)
       createMetrics("Optimizable", "file.c", 100, 80, 20, 0));  // savings = 20
   metrics.push_back(
       createMetrics("NoSavings", "file.c", 80, 80, 0, 0));  // savings = 0
-  metrics.push_back(createMetrics(
-      "AlsoOptimizable", "file.c", 64, 48, 16, 0));  // savings = 16
+  metrics.push_back(createMetrics("AlsoOptimizable",
+                                  "file.c",
+                                  64,
+                                  48,
+                                  16,
+                                  0));  // savings = 16
 
   auto result = alchemy::metrics::reporter::detail::extractOptimizable(metrics);
 
@@ -212,11 +215,11 @@ TEST_F(SAlignReporterTest, AggregateByFileGroupsByFilename)
   ASSERT_EQ(fileStats.size(), 2);
 
   // find file1.c stats
-  auto file1It =
-      std::find_if(fileStats.begin(), fileStats.end(), [](const auto& fs) {
-        return fs.file.filename() == "file1.c";
+  auto file1It = std::find_if(
+      std::begin(fileStats), std::end(fileStats), [](const auto& fs) {
+        return std::filesystem::path(fs.file).filename() == "file1.c";
       });
-  ASSERT_NE(file1It, fileStats.end());
+  ASSERT_NE(file1It, std::end(fileStats));
 
   ASSERT_EQ(file1It->structCount, 2);
   ASSERT_EQ(file1It->totalSizeCurrent, 164);     // 100 + 64
@@ -225,11 +228,11 @@ TEST_F(SAlignReporterTest, AggregateByFileGroupsByFilename)
   ASSERT_EQ(file1It->wastedPaddingCurrent, 36);  // 20 + 16
 
   // find file2.c stats
-  auto file2It =
-      std::find_if(fileStats.begin(), fileStats.end(), [](const auto& fs) {
-        return fs.file.filename() == "file2.c";
+  auto file2It = std::find_if(
+      std::begin(fileStats), std::end(fileStats), [](const auto& fs) {
+        return std::filesystem::path(fs.file).filename() == "file2.c";
       });
-  ASSERT_NE(file2It, fileStats.end());
+  ASSERT_NE(file2It, std::end(fileStats));
 
   ASSERT_EQ(file2It->structCount, 1);
   ASSERT_EQ(file2It->totalSizeCurrent, 128);
@@ -250,13 +253,13 @@ TEST_F(SAlignReporterTest, AggregateByFileSortsBySavingsDescending)
 
   ASSERT_EQ(fileStats.size(), 3);
   // sorted by savings descending: file2 (64), file3 (20), file1 (10)
-  ASSERT_EQ(fileStats[0].file.filename(), "file2.c");
+  ASSERT_EQ(std::filesystem::path(fileStats[0].file).filename(), "file2.c");
   ASSERT_EQ(fileStats[0].totalSizeCurrent - fileStats[0].totalSizeOptimized,
             64);
-  ASSERT_EQ(fileStats[1].file.filename(), "file3.c");
+  ASSERT_EQ(std::filesystem::path(fileStats[1].file).filename(), "file3.c");
   ASSERT_EQ(fileStats[1].totalSizeCurrent - fileStats[1].totalSizeOptimized,
             20);
-  ASSERT_EQ(fileStats[2].file.filename(), "file1.c");
+  ASSERT_EQ(std::filesystem::path(fileStats[2].file).filename(), "file1.c");
   ASSERT_EQ(fileStats[2].totalSizeCurrent - fileStats[2].totalSizeOptimized,
             10);
 }
@@ -433,6 +436,84 @@ TEST_F(SAlignReporterTest, ReportHandlesOptimizableMetrics)
       << "alchemy::testing::unit::output should contain per-file summary";
   ASSERT_NE(output.find("by_struct"), std::string::npos)
       << "alchemy::testing::unit::output should contain per-struct summary";
+}
+
+TEST_F(SAlignReporterTest, ReportHandlesArrayHintMetrics)
+{
+  std::vector<alchemy::metrics::detail::SAlignMetrics> metrics;
+  auto m = createMetrics("BigStruct", "file.c", 100, 12, 20, 0);
+  // set optimizedCacheSize > optimizedSize to trigger Array Hint branch
+  m.optimizedCacheSize = 192;
+  metrics.push_back(m);
+
+  ::testing::internal::CaptureStdout();
+  alchemy::metrics::reporter::SAlignReporter::report(metrics);
+  std::string output = ::testing::internal::GetCapturedStdout();
+
+  ASSERT_NE(output.find("Array Hint"), std::string::npos)
+      << "output should contain Array Hint when optimizedCacheSize > "
+         "optimizedSize";
+}
+
+// ============================================================================
+// FEATURE: skipped struct reporting
+// ============================================================================
+
+TEST_F(SAlignReporterTest, ExtractOptimizableExcludesSkippedStructs)
+{
+  std::vector<alchemy::metrics::detail::SAlignMetrics> metrics;
+  metrics.push_back(
+      createMetrics("Optimizable", "file.c", 100, 80, 20, 0));  // savings = 20
+
+  auto skipped = createMetrics("Packed", "file.c", 80, 80, 0, 0);
+  skipped.skipped = true;
+  metrics.push_back(skipped);
+
+  auto result = alchemy::metrics::reporter::detail::extractOptimizable(metrics);
+
+  ASSERT_EQ(result.size(), 1);
+  ASSERT_EQ(result[0].structName, "Optimizable");
+}
+
+TEST_F(SAlignReporterTest, ReportPrintsSkippedPackedStructWarning)
+{
+  std::vector<alchemy::metrics::detail::SAlignMetrics> metrics;
+
+  // one optimizable struct
+  metrics.push_back(createMetrics("Normal", "file.c", 100, 80, 20, 0));
+
+  // two skipped packed structs
+  auto skipped1 = createMetrics("Packed1", "file.c", 80, 80, 0, 0);
+  skipped1.skipped = true;
+  metrics.push_back(skipped1);
+
+  auto skipped2 = createMetrics("Packed2", "file.c", 64, 64, 0, 0);
+  skipped2.skipped = true;
+  metrics.push_back(skipped2);
+
+  ::testing::internal::CaptureStdout();
+  alchemy::metrics::reporter::SAlignReporter::report(metrics);
+  std::string output = ::testing::internal::GetCapturedStdout();
+
+  ASSERT_NE(output.find("skipped"), std::string::npos)
+      << "output should contain 'skipped' for packed structs";
+  ASSERT_NE(output.find("2"), std::string::npos)
+      << "output should contain the count of skipped structs";
+  ASSERT_NE(output.find("#pragma packed"), std::string::npos)
+      << "output should mention #pragma packed";
+}
+
+TEST_F(SAlignReporterTest, ReportDoesNotPrintSkippedWarningWhenNoneSkipped)
+{
+  std::vector<alchemy::metrics::detail::SAlignMetrics> metrics;
+  metrics.push_back(createMetrics("Normal", "file.c", 100, 80, 20, 0));
+
+  ::testing::internal::CaptureStdout();
+  alchemy::metrics::reporter::SAlignReporter::report(metrics);
+  std::string output = ::testing::internal::GetCapturedStdout();
+
+  ASSERT_EQ(output.find("skipped"), std::string::npos)
+      << "output should not contain 'skipped' when no structs are skipped";
 }
 
 }  // namespace alchemy::testing

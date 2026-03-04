@@ -27,10 +27,8 @@ protected:
   SetUp() override
   {
     // create temporary test directory
-    tempDir = std::filesystem::temp_directory_path() / "alchemy_salign_test" /
-              std::to_string(
-                  std::chrono::steady_clock::now().time_since_epoch().count());
-    std::filesystem::create_directories(tempDir);
+    tempDir =
+        alchemy::testing::utils::createTempTestDirectory("alchemy_salign_test");
   }
 
   void

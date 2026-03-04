@@ -17,6 +17,14 @@
 
 namespace alchemy::operation::refactoring {
 
+namespace detail {
+
+// build source-faithful replacement text for a reordered field
+std::string
+buildReplacementText(const alchemy::parser::artifacts::FieldDef& field);
+
+}  // namespace detail
+
 struct StructAnalysis {
   std::vector<alchemy::operation::detail::RefactorRecipe> recipes;
   alchemy::metrics::detail::SAlignMetrics metrics;
@@ -24,12 +32,11 @@ struct StructAnalysis {
 
 class StructAlignmentOperation {
 public:
-  double
-  calculatePercentage(std::size_t numerator, std::size_t denominator) const;
+  // typical cache line size for struct packing analysis
+  static constexpr std::size_t CacheLineBytes = 64;
 
   // cache metrics result
   struct CacheMetrics {
-    double spclScore;
     std::size_t cacheWaste;
     double cacheUtil;
   };

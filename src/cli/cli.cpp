@@ -1,22 +1,23 @@
 // src/cli/cli.cpp
+#include "cli/cli.hpp"
+
 // std
+#include <cstddef>
+
 #include <exception>
+#include <filesystem>
 #include <thread>
 #include <utility>
 #include <vector>
 
+// 3rd party
 #include <fmt/core.h>
 #include <llvm/Support/CommandLine.h>
-#include <llvm/Support/Error.h>
-
-// 3rd party
-
-#include "app/color.hpp"
-#include "app/core/core.hpp"
-#include "clang/Tooling/CommonOptionsParser.h"
 
 // local
-#include "cli/cli.hpp"
+#include "app/color.hpp"
+#include "app/core/core.hpp"
+#include "cli/config_parser.hpp"
 
 void
 alchemy::cli::Validator::applyDefaults(CliInputs& inputs)
@@ -29,8 +30,9 @@ alchemy::cli::Validator::applyDefaults(CliInputs& inputs)
 }
 
 alchemy::core::Result<bool>
-alchemy::cli::Validator::validateBasicRequirements(const FeatureFlags& flags,
-                                                   const PathOptions& paths)
+alchemy::cli::Validator::validateBasicRequirements(
+    const alchemy::cli::FeatureFlags& flags,
+    const alchemy::cli::PathOptions& paths)
 {
   // error: at least one feature must be enabled
   if (!flags.enableSalign)
@@ -61,7 +63,7 @@ alchemy::cli::Validator::validateBasicRequirements(const FeatureFlags& flags,
 }
 
 alchemy::core::Result<alchemy::cli::ParsedOptions>
-alchemy::cli::Validator::validate(CliInputs&& inputs)
+alchemy::cli::Validator::validate(alchemy::cli::CliInputs&& inputs)
 {
   // step 1: apply defaults (including feature-specific defaults)
   alchemy::cli::Validator::applyDefaults(inputs);
@@ -82,11 +84,49 @@ alchemy::cli::Validator::validate(CliInputs&& inputs)
   options.sourcePatterns = std::move(inputs.paths.sourcePatterns);
   options.excludePatterns = std::move(inputs.paths.excludePatterns);
   options.enableSalign = inputs.features.enableSalign;
-  options.enableDryRun = inputs.enableDryRun;
   options.jobs = inputs.jobs;
+  options.enableDryRun = inputs.enableDryRun;
+  options.dumpConfig = inputs.dumpConfig;
 
   return alchemy::core::Result<alchemy::cli::ParsedOptions>::success(
       std::move(options));
+}
+
+alchemy::cli::CliInputs
+alchemy::cli::mergeInputs(CliInputs&& cli, CliInputs&& config)
+{
+  alchemy::cli::CliInputs merged = std::move(cli);
+
+  if (merged.paths.buildDir.empty())
+  {
+    merged.paths.buildDir = std::move(config.paths.buildDir);
+  }
+  if (merged.paths.outputDir.empty())
+  {
+    merged.paths.outputDir = std::move(config.paths.outputDir);
+  }
+  if (merged.paths.sourcePatterns.empty())
+  {
+    merged.paths.sourcePatterns = std::move(config.paths.sourcePatterns);
+  }
+  if (merged.paths.excludePatterns.empty())
+  {
+    merged.paths.excludePatterns = std::move(config.paths.excludePatterns);
+  }
+  if (!merged.features.enableSalign)
+  {
+    merged.features.enableSalign = config.features.enableSalign;
+  }
+  if (!merged.enableDryRun)
+  {
+    merged.enableDryRun = config.enableDryRun;
+  }
+  if (merged.jobs == 1 && config.jobs != 1)
+  {
+    merged.jobs = config.jobs;
+  }
+
+  return merged;
 }
 
 // ============================================================================
@@ -98,69 +138,156 @@ alchemy::cli::parseCli(int argc, const char** argv)
 {
   try
   {
-    // static LLVM objects - initialized once, avoiding multiple registry issues
+    // static LLVM objects: initialized once, avoiding multiple registry issues
     static llvm::cl::OptionCategory category("alchemy::cli::options");
 
     static llvm::cl::opt<std::string> buildDirOpt(
-        "b",
-        llvm::cl::desc("alchemy::cli::build directory (-p is clang's)"),
+        "build-dir",
+        llvm::cl::desc("project build directory"),
         llvm::cl::value_desc("file_path"),
         llvm::cl::cat(category));
+    static const llvm::cl::alias BuildDirOptAlias(
+        "b",
+        llvm::cl::desc("alias for --build-dir"),
+        llvm::cl::aliasopt(buildDirOpt));
 
     static llvm::cl::opt<std::string> outputDirOpt(
-        "o",
-        llvm::cl::desc("alchemy::cli::output directory"),
+        "output-dir",
+        llvm::cl::desc("output directory"),
         llvm::cl::value_desc("file_path"),
         llvm::cl::cat(category));
+    static const llvm::cl::alias OutputDirOptAlias(
+        "o",
+        llvm::cl::desc("alias for --output-dir"),
+        llvm::cl::aliasopt(outputDirOpt));
 
     static llvm::cl::opt<bool> salignOpt(
         "salign",
-        llvm::cl::desc("alchemy::cli::enable struct alignment optimization"),
+        llvm::cl::desc("struct alignment optimization"),
         llvm::cl::cat(category));
 
-    static llvm::cl::opt<bool> dryRunOpt(
-        "dry-run",
-        llvm::cl::desc(
-            "alchemy::cli::enable dry run, re-directs output to stdout"),
+    // source file patterns (positional arguments)
+    static llvm::cl::list<std::string> sourcePatternsOpt(
+        llvm::cl::Positional,
+        llvm::cl::desc("<source0> [... sourceN]"),
+        llvm::cl::ZeroOrMore,
         llvm::cl::cat(category));
 
-    static llvm::cl::list<std::string> excludeOpt(
+    // source file exclusion patterns (do not process)
+    static llvm::cl::list<std::string> excludePatternsOpt(
         "exclude",
-        llvm::cl::desc("alchemy::cli::exclude source patterns"),
+        llvm::cl::desc("exclude source patterns"),
         llvm::cl::value_desc("file_path | file_glob"),
         llvm::cl::ZeroOrMore,
         llvm::cl::cat(category));
 
     static llvm::cl::opt<unsigned> jobsOpt(
-        "j",
-        llvm::cl::desc("Number of parallel jobs (default: 1, use 0 for "
-                       "auto-detect based on CPU cores"),
+        "jobs",
+        llvm::cl::desc("number of parallel jobs (default: 1, use 0 for "
+                       "auto-detect CPU cores)"),
         llvm::cl::init(1),
         llvm::cl::value_desc("N"),
         llvm::cl::cat(category));
+    static const llvm::cl::alias JobsOptAlias(
+        "j", llvm::cl::desc("alias for --jobs"), llvm::cl::aliasopt(jobsOpt));
 
-    // let LLVM parse the command line
-    auto llvmParser =
-        clang::tooling::CommonOptionsParser::create(argc, argv, category);
-    if (!llvmParser)
+    static llvm::cl::opt<bool> dryRunOpt(
+        "dry-run",
+        llvm::cl::desc("enable dry run, re-directs output to stdout"),
+        llvm::cl::cat(category));
+
+    // dump cmd line args to a config file
+    static llvm::cl::opt<bool> dumpConfigOpt(
+        "dump-config",
+        llvm::cl::desc("write cmd-line args to config file"),
+        llvm::cl::cat(category));
+
+    // suppress LLVM/non-related cli options
+    llvm::cl::HideUnrelatedOptions(category);
+    // parse command line directly (no CommonOptionsParser — avoids premature
+    // compilation database auto-detection that produces misleading errors
+    // before alchemy's own -b flag and file discovery have run)
+    if (!llvm::cl::ParseCommandLineOptions(argc, argv, "alchemy"))
     {
-      std::string error = llvm::toString(llvmParser.takeError());
-
       return alchemy::core::Result<alchemy::cli::ParsedOptions>::failure(
-          alchemy::core::Error::format(
-              "alchemy::cli", "failed to parse cmd line arguments: {}", error));
+          alchemy::core::Error::format("alchemy::cli",
+                                       "failed to parse cmd line arguments"));
     }
 
+    // canonicalize paths only when provided (canonical throws on empty strings)
+    auto buildDir = buildDirOpt.getValue();
+    auto outputDir = outputDirOpt.getValue();
+
     // collect CLI inputs (grouped by semantic purpose)
-    CliInputs inputs{
-        .paths = {.buildDir = buildDirOpt.getValue(),
-                  .outputDir = outputDirOpt.getValue(),
-                  .sourcePatterns = llvmParser->getSourcePathList(),
-                  .excludePatterns = std::vector<std::string>(
-                      excludeOpt.begin(), excludeOpt.end())},
+    alchemy::cli::CliInputs inputs{
+        .paths =
+            {.buildDir = buildDir.empty()
+                             ? ""
+                             : std::filesystem::canonical(buildDir).string(),
+             .outputDir = outputDir.empty()
+                              ? ""
+                              : std::filesystem::canonical(outputDir).string(),
+             .sourcePatterns = std::vector<std::string>(
+                 std::begin(sourcePatternsOpt), std::end(sourcePatternsOpt)),
+             .excludePatterns = std::vector<std::string>(
+                 std::begin(excludePatternsOpt), std::end(excludePatternsOpt))},
         .features = {.enableSalign = salignOpt.getValue()},
         .jobs = static_cast<std::size_t>(jobsOpt.getValue()),
-        .enableDryRun = dryRunOpt.getValue()};
+        .enableDryRun = dryRunOpt.getValue(),
+        .dumpConfig = dumpConfigOpt.getValue()};
+
+    // parse a config if it exists, cli args take precedence
+    const std::filesystem::path ConfigLoc =
+        std::filesystem::current_path() / ".alchemy/alchemy.toml";
+    if (std::filesystem::exists(ConfigLoc))
+    {
+      fmt::print(stdout,
+                 "alchemy::{}cli{}::config file found: {}{}{}\n",
+                 alchemy::color::ansi::BoldBrightGreen,
+                 alchemy::color::ansi::Reset,
+                 alchemy::color::ansi::BoldBrightGreen,
+                 ConfigLoc.string(),
+                 alchemy::color::ansi::Reset);
+      auto configResult = alchemy::config::parser::loadConfig(ConfigLoc);
+      if (configResult.valid())
+      {
+        fmt::print("alchemy::cli::{}config{}::loaded {}{}{}\n",
+                   alchemy::color::ansi::BoldBrightGreen,
+                   alchemy::color::ansi::Reset,
+                   alchemy::color::ansi::BrightGreen,
+                   ConfigLoc.string(),
+                   alchemy::color::ansi::Reset);
+
+        auto configInputs = configResult.value();
+
+        // canonicalize config paths (CLI paths are already canonical)
+        if (!configInputs.paths.buildDir.empty())
+        {
+          configInputs.paths.buildDir =
+              std::filesystem::canonical(configInputs.paths.buildDir).string();
+        }
+        if (!configInputs.paths.outputDir.empty())
+        {
+          configInputs.paths.outputDir =
+              std::filesystem::canonical(configInputs.paths.outputDir).string();
+        }
+
+        inputs = alchemy::cli::mergeInputs(std::move(inputs),
+                                           std::move(configInputs));
+      }
+      else
+      {
+        fmt::print(stderr,
+                   "alchemy::{}config{}::{}warning{}: failed to parse "
+                   "{}: {}\n",
+                   alchemy::color::ansi::BoldBrightGreen,
+                   alchemy::color::ansi::Reset,
+                   alchemy::color::ansi::Yellow,
+                   alchemy::color::ansi::Reset,
+                   ConfigLoc.string(),
+                   configResult.error());
+      }
+    }
 
     // validate and construct final options
     return alchemy::cli::Validator::validate(std::move(inputs));

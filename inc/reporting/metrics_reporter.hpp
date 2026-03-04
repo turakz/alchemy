@@ -9,13 +9,8 @@
 
 // local
 #include "metrics/metrics.hpp"
-#include "metrics/salign_metrics.hpp"
 
 namespace alchemy::metrics::reporter {
-
-// report overloads: operations produce metrics (variants) - batch reporting
-void
-report(const std::vector<alchemy::metrics::detail::SAlignMetrics>& metrics);
 
 // dispatcher - separates variants and calls appropriate report function
 void

@@ -2,18 +2,19 @@
 // unit tests validating mathematical invariants of struct alignment metrics
 // Uses hand-calculated layout values to avoid circular verification.
 //
-// Reference layout (unoptimized): char(1,align=1), double(8,align=8), int(4,align=4)
+// Reference layout (unoptimized): char(1,align=1), double(8,align=8),
+// int(4,align=4)
 //   naturalAlignment = 8
 //   Layout: char@0(1) + 7pad + double@8(8) + int@16(4) + 4pad = 24 bytes
 //   dataSize = 1+8+4 = 13, totalSize = 24, waste = 11
 //
-// Reference layout (optimal): double(8,align=8), int(4,align=4), char(1,align=1)
+// Reference layout (optimal): double(8,align=8), int(4,align=4),
+// char(1,align=1)
 //   naturalAlignment = 8
 //   Layout: double@0(8) + int@8(4) + char@12(1) + 3pad = 16 bytes
 //   dataSize = 8+4+1 = 13, totalSize = 16, waste = 3
 
 // std
-#include <cmath>
 #include <cstddef>
 
 #include <numeric>
@@ -30,9 +31,10 @@
 namespace alchemy::testing {
 
 // hand-calculated constants for unoptimized struct: char, double, int
-constexpr std::size_t UnoptDataSize = 13;   // 1 + 8 + 4
-constexpr std::size_t UnoptTotalSize = 24;  // char@0 + 7pad + double@8 + int@16 + 4pad
-constexpr std::size_t UnoptWaste = 11;      // 24 - 13
+constexpr std::size_t UnoptDataSize = 13;  // 1 + 8 + 4
+constexpr std::size_t UnoptTotalSize =
+    24;  // char@0 + 7pad + double@8 + int@16 + 4pad
+constexpr std::size_t UnoptWaste = 11;  // 24 - 13
 constexpr std::size_t UnoptAlignment = 8;
 
 // hand-calculated constants for already-optimal struct: double, int, char
@@ -61,13 +63,12 @@ TEST_F(SalignMetricsInvariants, ComputeDataSizeMatchesHandCalculated)
   const std::vector<alchemy::parser::artifacts::FieldDef> Fields = {
       utils::createFieldDef(0, 12, "char", "a", 1, 1),
       utils::createFieldDef(12, 14, "double", "b", 8, 8),
-      utils::createFieldDef(26, 11, "int", "c", 4, 4)
-  };
+      utils::createFieldDef(26, 11, "int", "c", 4, 4)};
 
-  ASSERT_EQ(
-      alchemy::parser::artifacts::StructDef::computeDataSize(Fields),
-      UnoptDataSize)
-      << "computeDataSize should return sum of field naturalSize values (1+8+4=13)";
+  ASSERT_EQ(alchemy::parser::artifacts::StructDef::computeDataSize(Fields),
+            UnoptDataSize)
+      << "computeDataSize should return sum of field naturalSize values "
+         "(1+8+4=13)";
 }
 
 TEST_F(SalignMetricsInvariants, ComputeSizeMatchesHandCalculated)
@@ -75,12 +76,11 @@ TEST_F(SalignMetricsInvariants, ComputeSizeMatchesHandCalculated)
   const std::vector<alchemy::parser::artifacts::FieldDef> Fields = {
       utils::createFieldDef(0, 12, "char", "a", 1, 1),
       utils::createFieldDef(12, 14, "double", "b", 8, 8),
-      utils::createFieldDef(26, 11, "int", "c", 4, 4)
-  };
+      utils::createFieldDef(26, 11, "int", "c", 4, 4)};
 
-  ASSERT_EQ(
-      alchemy::parser::artifacts::StructDef::computeSize(Fields, UnoptAlignment),
-      UnoptTotalSize)
+  ASSERT_EQ(alchemy::parser::artifacts::StructDef::computeSize(Fields,
+                                                               UnoptAlignment),
+            UnoptTotalSize)
       << "computeSize should return 24 for char+double+int with align=8";
 }
 
@@ -89,8 +89,7 @@ TEST_F(SalignMetricsInvariants, ComputeSizeMatchesHandCalculatedOptimal)
   const std::vector<alchemy::parser::artifacts::FieldDef> Fields = {
       utils::createFieldDef(0, 14, "double", "a", 8, 8),
       utils::createFieldDef(14, 11, "int", "b", 4, 4),
-      utils::createFieldDef(25, 12, "char", "c", 1, 1)
-  };
+      utils::createFieldDef(25, 12, "char", "c", 1, 1)};
 
   ASSERT_EQ(
       alchemy::parser::artifacts::StructDef::computeSize(Fields, OptAlignment),
@@ -106,11 +105,14 @@ TEST_F(SalignMetricsInvariants, ReorderingFieldsDoesNotChangeDataSize)
   const std::vector<alchemy::parser::artifacts::FieldDef> Fields = {
       utils::createFieldDef(0, 12, "char", "a", 1, 1),
       utils::createFieldDef(12, 14, "double", "b", 8, 8),
-      utils::createFieldDef(26, 11, "int", "c", 4, 4)
-  };
-  auto structDef = utils::createStructDefExplicit(
-      "TestStruct", "/test/file.h", Fields, UnoptAlignment,
-      UnoptDataSize, UnoptTotalSize, UnoptWaste);
+      utils::createFieldDef(26, 11, "int", "c", 4, 4)};
+  auto structDef = utils::createStructDefExplicit("TestStruct",
+                                                  "/test/file.h",
+                                                  Fields,
+                                                  UnoptAlignment,
+                                                  UnoptDataSize,
+                                                  UnoptTotalSize,
+                                                  UnoptWaste);
 
   const alchemy::operation::refactoring::StructAlignmentOperation Op;
   auto analysis = Op.analyzeStruct(structDef);
@@ -147,11 +149,14 @@ TEST_F(SalignMetricsInvariants, TotalSizeEqualsDataSizePlusPaddingWaste)
   const std::vector<alchemy::parser::artifacts::FieldDef> Fields = {
       utils::createFieldDef(0, 12, "char", "a", 1, 1),
       utils::createFieldDef(12, 14, "double", "b", 8, 8),
-      utils::createFieldDef(26, 11, "int", "c", 4, 4)
-  };
-  auto structDef = utils::createStructDefExplicit(
-      "TestStruct", "/test/file.h", Fields, UnoptAlignment,
-      UnoptDataSize, UnoptTotalSize, UnoptWaste);
+      utils::createFieldDef(26, 11, "int", "c", 4, 4)};
+  auto structDef = utils::createStructDefExplicit("TestStruct",
+                                                  "/test/file.h",
+                                                  Fields,
+                                                  UnoptAlignment,
+                                                  UnoptDataSize,
+                                                  UnoptTotalSize,
+                                                  UnoptWaste);
 
   const alchemy::operation::refactoring::StructAlignmentOperation Op;
   auto analysis = Op.analyzeStruct(structDef);
@@ -181,11 +186,14 @@ TEST_F(SalignMetricsInvariants,
   const std::vector<alchemy::parser::artifacts::FieldDef> Fields = {
       utils::createFieldDef(0, 12, "char", "a", 1, 1),
       utils::createFieldDef(12, 14, "double", "b", 8, 8),
-      utils::createFieldDef(26, 11, "int", "c", 4, 4)
-  };
-  auto structDef = utils::createStructDefExplicit(
-      "TestStruct", "/test/file.h", Fields, UnoptAlignment,
-      UnoptDataSize, UnoptTotalSize, UnoptWaste);
+      utils::createFieldDef(26, 11, "int", "c", 4, 4)};
+  auto structDef = utils::createStructDefExplicit("TestStruct",
+                                                  "/test/file.h",
+                                                  Fields,
+                                                  UnoptAlignment,
+                                                  UnoptDataSize,
+                                                  UnoptTotalSize,
+                                                  UnoptWaste);
 
   const alchemy::operation::refactoring::StructAlignmentOperation Op;
   auto analysis = Op.analyzeStruct(structDef);
@@ -209,11 +217,14 @@ TEST_F(SalignMetricsInvariants,
   const std::vector<alchemy::parser::artifacts::FieldDef> Fields = {
       utils::createFieldDef(0, 14, "double", "a", 8, 8),
       utils::createFieldDef(14, 11, "int", "b", 4, 4),
-      utils::createFieldDef(25, 12, "char", "c", 1, 1)
-  };
-  auto structDef = utils::createStructDefExplicit(
-      "OptimalStruct", "/test/file.h", Fields, OptAlignment,
-      OptDataSize, OptTotalSize, OptWaste);
+      utils::createFieldDef(25, 12, "char", "c", 1, 1)};
+  auto structDef = utils::createStructDefExplicit("OptimalStruct",
+                                                  "/test/file.h",
+                                                  Fields,
+                                                  OptAlignment,
+                                                  OptDataSize,
+                                                  OptTotalSize,
+                                                  OptWaste);
 
   const alchemy::operation::refactoring::StructAlignmentOperation Op;
   auto analysis = Op.analyzeStruct(structDef);
@@ -235,19 +246,21 @@ TEST_F(SalignMetricsInvariants, WastePercentageMatchesWasteBytesOverTotalSize)
   const std::vector<alchemy::parser::artifacts::FieldDef> Fields = {
       utils::createFieldDef(0, 12, "char", "a", 1, 1),
       utils::createFieldDef(12, 14, "double", "b", 8, 8),
-      utils::createFieldDef(26, 11, "int", "c", 4, 4)
-  };
-  auto structDef = utils::createStructDefExplicit(
-      "TestStruct", "/test/file.h", Fields, UnoptAlignment,
-      UnoptDataSize, UnoptTotalSize, UnoptWaste);
+      utils::createFieldDef(26, 11, "int", "c", 4, 4)};
+  auto structDef = utils::createStructDefExplicit("TestStruct",
+                                                  "/test/file.h",
+                                                  Fields,
+                                                  UnoptAlignment,
+                                                  UnoptDataSize,
+                                                  UnoptTotalSize,
+                                                  UnoptWaste);
 
   const alchemy::operation::refactoring::StructAlignmentOperation Op;
   auto analysis = Op.analyzeStruct(structDef);
 
   // current waste percentage against hand-calculated values
   const double ExpectedCurrentWastePercent =
-      (static_cast<double>(UnoptWaste) /
-       static_cast<double>(UnoptTotalSize)) *
+      (static_cast<double>(UnoptWaste) / static_cast<double>(UnoptTotalSize)) *
       100.0;
   ASSERT_NEAR(
       analysis.metrics.currentWastePercent, ExpectedCurrentWastePercent, 0.01)
@@ -279,25 +292,28 @@ TEST_F(SalignMetricsInvariants,
   const std::vector<alchemy::parser::artifacts::FieldDef> Fields = {
       utils::createFieldDef(0, 12, "char", "a", 1, 1),
       utils::createFieldDef(12, 14, "double", "b", 8, 8),
-      utils::createFieldDef(26, 11, "int", "c", 4, 4)
-  };
-  auto structDef = utils::createStructDefExplicit(
-      "TestStruct", "/test/file.h", Fields, UnoptAlignment,
-      UnoptDataSize, UnoptTotalSize, UnoptWaste);
+      utils::createFieldDef(26, 11, "int", "c", 4, 4)};
+  auto structDef = utils::createStructDefExplicit("TestStruct",
+                                                  "/test/file.h",
+                                                  Fields,
+                                                  UnoptAlignment,
+                                                  UnoptDataSize,
+                                                  UnoptTotalSize,
+                                                  UnoptWaste);
 
   const alchemy::operation::refactoring::StructAlignmentOperation Op;
   auto analysis = Op.analyzeStruct(structDef);
 
   // savings bytes = current - optimized (using hand-calculated current)
-  const std::size_t ExpectedSavings = UnoptTotalSize - OptTotalSize;  // 24 - 16 = 8
+  const std::size_t ExpectedSavings =
+      UnoptTotalSize - OptTotalSize;  // 24 - 16 = 8
   ASSERT_EQ(analysis.metrics.possibleSavings, ExpectedSavings)
       << "savings bytes must equal currentSize - optimizedSize (24-16=8)";
 
   // savings percentage against hand-calculated values
-  const double ExpectedSavingsPercent =
-      (static_cast<double>(ExpectedSavings) /
-       static_cast<double>(UnoptTotalSize)) *
-      100.0;
+  const double ExpectedSavingsPercent = (static_cast<double>(ExpectedSavings) /
+                                         static_cast<double>(UnoptTotalSize)) *
+                                        100.0;
   ASSERT_NEAR(analysis.metrics.savingsPercent, ExpectedSavingsPercent, 0.01)
       << "savings % must equal (bytesSaved / currentTotal) x 100";
 
@@ -314,11 +330,14 @@ TEST_F(SalignMetricsInvariants, CacheWasteMustBeLessThanCacheLineSize)
   const std::vector<alchemy::parser::artifacts::FieldDef> Fields = {
       utils::createFieldDef(0, 12, "char", "a", 1, 1),
       utils::createFieldDef(12, 14, "double", "b", 8, 8),
-      utils::createFieldDef(26, 11, "int", "c", 4, 4)
-  };
-  auto structDef = utils::createStructDefExplicit(
-      "TestStruct", "/test/file.h", Fields, UnoptAlignment,
-      UnoptDataSize, UnoptTotalSize, UnoptWaste);
+      utils::createFieldDef(26, 11, "int", "c", 4, 4)};
+  auto structDef = utils::createStructDefExplicit("TestStruct",
+                                                  "/test/file.h",
+                                                  Fields,
+                                                  UnoptAlignment,
+                                                  UnoptDataSize,
+                                                  UnoptTotalSize,
+                                                  UnoptWaste);
 
   const alchemy::operation::refactoring::StructAlignmentOperation Op;
   auto analysis = Op.analyzeStruct(structDef);
@@ -335,11 +354,14 @@ TEST_F(SalignMetricsInvariants, CacheUtilizationPercentageIsWithinValidRange)
   const std::vector<alchemy::parser::artifacts::FieldDef> Fields = {
       utils::createFieldDef(0, 12, "char", "a", 1, 1),
       utils::createFieldDef(12, 14, "double", "b", 8, 8),
-      utils::createFieldDef(26, 11, "int", "c", 4, 4)
-  };
-  auto structDef = utils::createStructDefExplicit(
-      "TestStruct", "/test/file.h", Fields, UnoptAlignment,
-      UnoptDataSize, UnoptTotalSize, UnoptWaste);
+      utils::createFieldDef(26, 11, "int", "c", 4, 4)};
+  auto structDef = utils::createStructDefExplicit("TestStruct",
+                                                  "/test/file.h",
+                                                  Fields,
+                                                  UnoptAlignment,
+                                                  UnoptDataSize,
+                                                  UnoptTotalSize,
+                                                  UnoptWaste);
 
   const alchemy::operation::refactoring::StructAlignmentOperation Op;
   auto analysis = Op.analyzeStruct(structDef);
@@ -349,41 +371,6 @@ TEST_F(SalignMetricsInvariants, CacheUtilizationPercentageIsWithinValidRange)
   ASSERT_LE(analysis.metrics.currentCacheUtil, 100.0);
   ASSERT_GE(analysis.metrics.optimizedCacheUtil, 0.0);
   ASSERT_LE(analysis.metrics.optimizedCacheUtil, 100.0);
-}
-
-//==============================================================================
-// invariant 7: splc formula
-//==============================================================================
-TEST_F(SalignMetricsInvariants,
-       StructsPerCacheLineMatchesFloorOfSixtyFourDividedBySize)
-{
-  const std::vector<alchemy::parser::artifacts::FieldDef> Fields = {
-      utils::createFieldDef(0, 12, "char", "a", 1, 1),
-      utils::createFieldDef(12, 14, "double", "b", 8, 8),
-      utils::createFieldDef(26, 11, "int", "c", 4, 4)
-  };
-  auto structDef = utils::createStructDefExplicit(
-      "TestStruct", "/test/file.h", Fields, UnoptAlignment,
-      UnoptDataSize, UnoptTotalSize, UnoptWaste);
-
-  const alchemy::operation::refactoring::StructAlignmentOperation Op;
-  auto analysis = Op.analyzeStruct(structDef);
-
-  // current spcl = floor(64 / currentSize) -- using hand-calculated total
-  const double ExpectedCurrentSpcl =
-      std::floor(64.0 / static_cast<double>(UnoptTotalSize));  // floor(64/24) = 2
-  ASSERT_EQ(analysis.metrics.currentSpclScore, ExpectedCurrentSpcl)
-      << "current splc must equal floor(64 / currentSize)";
-
-  // optimized splc = floor(64 / optimizedSize)
-  const double ExpectedOptimizedSpcl =
-      std::floor(64.0 / static_cast<double>(OptTotalSize));  // floor(64/16) = 4
-  ASSERT_EQ(analysis.metrics.optimizedSpclScore, ExpectedOptimizedSpcl)
-      << "optimized splc must equal floor(64 / optimizedSize)";
-
-  // splc must be non-negative
-  ASSERT_GE(analysis.metrics.currentSpclScore, 0.0);
-  ASSERT_GE(analysis.metrics.optimizedSpclScore, 0.0);
 }
 
 }  // namespace alchemy::testing

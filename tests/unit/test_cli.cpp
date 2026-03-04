@@ -24,7 +24,8 @@ protected:
   SetUp() override
   {
     // create temporary directories for testing
-    testDir = std::filesystem::temp_directory_path() / "alchemy_cli_test";
+    testDir = alchemy::testing::utils::createTempTestDirectory(
+        "alchemy_cli_test", false);
     buildDir = testDir / "build";
     outputDir = testDir / "output";
 
@@ -191,9 +192,10 @@ TEST_F(CLIValidatorTest, ParseCliHandlesInvalidFlag)
                                      "--invalid-flag-that-does-not-exist"};
   const int Argc = 2;
 
-  auto result = alchemy::cli::parseCli(Argc, argv.data());
-
-  ASSERT_TRUE(result.invalid());
+  // LLVM's ParseCommandLineOptions calls exit(1) on unrecognized flags,
+  // printing the error to stderr before terminating
+  ASSERT_DEATH(alchemy::cli::parseCli(Argc, argv.data()),
+               "Unknown command line argument");
 }
 
 // ============================================================================

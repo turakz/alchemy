@@ -1,12 +1,15 @@
 // tests/data/mock_compilers/mock_iccarm.cpp
 // mock IAR compiler for unit testing
 // handles: --preprocess=l (include query) and --predef_macros=n (defines query)
+
+// std
 #include <cstdint>
 
 #include <fstream>
 #include <string>
 
-#include "fmt/core.h"
+// 3rd party
+#include <fmt/core.h>
 
 std::int32_t
 main(int argc, char* argv[])

@@ -5,7 +5,6 @@
 // std
 #include <cstddef>
 
-#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -29,7 +28,7 @@ struct AlignmentStats {
 };
 
 struct FileStats : AlignmentStats {
-  std::filesystem::path file{};
+  std::string file;
   std::size_t structCount{0};
 };
 
@@ -37,6 +36,19 @@ struct GlobalStats : AlignmentStats {
   std::size_t totalStructs{0};
   std::size_t optimizableStructs{0};
 };
+
+// row data for metrics table rendering
+struct MetricsRow {
+  std::string label;
+  std::string current;
+  std::string optimized;
+  std::string improvement;
+};
+
+// render a table section: column header + rows + bottom separator
+void
+printMetricsTable(const std::string& subtitle,
+                  const std::vector<MetricsRow>& rows);
 
 // helper: format percentage change for display
 std::string

@@ -1,4 +1,4 @@
-# SmallVector Design Document
+# SmallVector Design Document — STATUS: NOT IMPLEMENTED
 
 ## Problem Statement
 
@@ -30,7 +30,7 @@ Create `inc/core/small_vector.hpp` that provides `alchemy::SmallVector` as a typ
 #ifndef ALCHEMY_SMALL_VECTOR_HPP
 #define ALCHEMY_SMALL_VECTOR_HPP
 
-// Implementation choice - swap this out if needed
+// Implementation choice: swap this out if needed
 #include <llvm/ADT/SmallVector.h>
 
 namespace alchemy {

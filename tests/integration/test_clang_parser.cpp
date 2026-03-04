@@ -1,4 +1,4 @@
-// tests/integration/parsing/test_realistic_databases.cpp
+// tests/integration/test_clang_parser.cpp
 // Integration tests for parser with realistic compilation databases
 
 // std
@@ -19,8 +19,8 @@ protected:
   SetUp() override
   {
     // create temp directory for this test
-    tempDir = std::filesystem::temp_directory_path() / "alchemy_parser_db_test";
-    std::filesystem::create_directories(tempDir);
+    tempDir = alchemy::testing::utils::createTempTestDirectory(
+        "alchemy_parser_db_test", false);
 
     // copy shared_project to temp directory
     auto sharedProjectSrc =
@@ -49,10 +49,10 @@ protected:
   std::filesystem::path buildDir;
 };
 
-TEST_F(ParserDatabaseIntegrationTest, ParsesHeadersWithGCCDatabase)
+TEST_F(ParserDatabaseIntegrationTest, ParsesHeadersWithGccDatabase)
 {
   // create realistic GCC database (only has source file entries, NO headers)
-  alchemy::testing::utils::createGCCDatabase(buildDir, projectDir);
+  alchemy::testing::utils::createGccDatabase(buildDir, projectDir);
 
   // parse header files that are NOT in the database
   const std::vector<std::filesystem::path> HeaderFiles = {
@@ -69,8 +69,8 @@ TEST_F(ParserDatabaseIntegrationTest, ParsesHeadersWithGCCDatabase)
       << parserResult.error();
 
   // verify correct compiler type detected
-  ASSERT_EQ(parserResult.value()->getName(), "GCC/Clang")
-      << "Should detect GCC/Clang compiler type";
+  ASSERT_EQ(parserResult.value()->getName(), "GCC")
+      << "Should detect GCC compiler type";
 
   const alchemy::parser::ParsingRequirements Requirements{.needsStructParsing =
                                                               true};
@@ -87,7 +87,7 @@ TEST_F(ParserDatabaseIntegrationTest, ParsesHeadersWithGCCDatabase)
 
 TEST_F(ParserDatabaseIntegrationTest, ParsesMixedFilesWithGCCDatabase)
 {
-  alchemy::testing::utils::createGCCDatabase(buildDir, projectDir);
+  alchemy::testing::utils::createGccDatabase(buildDir, projectDir);
 
   // mix of source files (in database) and headers (not in database)
   const std::vector<std::filesystem::path> MixedFiles = {
@@ -118,6 +118,42 @@ TEST_F(ParserDatabaseIntegrationTest, ParsesMixedFilesWithGCCDatabase)
          "HeaderOnlyStruct from header_only.h)";
 }
 
+TEST_F(ParserDatabaseIntegrationTest, ParsesHeaderUsingStdTypesViaTUPairing)
+{
+  // regression test: headers that use size_t, bool, uint8_t without
+  // #including the std headers (relying on the TU to include them first).
+  // alchemy pairs std_types.h with std_types.c in the database via basename
+  // matching — clang parses the TU which includes the std headers before
+  // the project header, so types resolve naturally through the include chain.
+  alchemy::testing::utils::createGccDatabase(buildDir, projectDir);
+
+  const std::vector<std::filesystem::path> HeaderFiles = {projectDir / "inc" /
+                                                          "std_types.h"};
+
+  auto parserResult =
+      alchemy::parser::ClangParser::create(HeaderFiles, buildDir);
+
+  ASSERT_TRUE(parserResult.valid())
+      << "Parser should create with std_types.h: " << parserResult.error();
+
+  const alchemy::parser::ParsingRequirements Requirements{.needsStructParsing =
+                                                              true};
+  auto parseResult = parserResult.value()->parse(Requirements);
+
+  ASSERT_TRUE(parseResult.valid())
+      << "Header using size_t/bool/uint8_t without #includes should parse "
+         "via TU pairing: "
+      << parseResult.error();
+
+  ASSERT_EQ(parseResult.value().structs.size(), 1)
+      << "Should find StdTypesStruct";
+
+  const auto& s = parseResult.value().structs[0];
+  EXPECT_EQ(s.structName, "StdTypesStruct");
+  EXPECT_EQ(s.fields.size(), 5)
+      << "Should have 5 fields (size_t, uint8_t, bool, uint32_t, int16_t)";
+}
+
 TEST_F(ParserDatabaseIntegrationTest, ParsesHeadersWithClangDatabase)
 {
   alchemy::testing::utils::createClangDatabase(buildDir, projectDir);
@@ -135,8 +171,8 @@ TEST_F(ParserDatabaseIntegrationTest, ParsesHeadersWithClangDatabase)
       << parserResult.error();
 
   // verify correct compiler type detected
-  ASSERT_EQ(parserResult.value()->getName(), "GCC/Clang")
-      << "Should detect GCC/Clang compiler type";
+  ASSERT_EQ(parserResult.value()->getName(), "Clang")
+      << "Should detect Clang compiler type";
 
   const alchemy::parser::ParsingRequirements Requirements{.needsStructParsing =
                                                               true};
@@ -164,11 +200,11 @@ TEST_F(ParserDatabaseIntegrationTest, ParsesMixedFilesWithClangDatabase)
       alchemy::parser::ClangParser::create(MixedFiles, buildDir);
 
   ASSERT_TRUE(parserResult.valid())
-      << "Parser should handle mixed files with GCC/Clang database: "
+      << "Parser should handle mixed files with Clang database: "
       << parserResult.error();
 
-  ASSERT_EQ(parserResult.value()->getName(), "GCC/Clang")
-      << "Should detect GCC/Clang compiler type";
+  ASSERT_EQ(parserResult.value()->getName(), "Clang")
+      << "Should detect Clang compiler type";
 
   const alchemy::parser::ParsingRequirements Requirements{.needsStructParsing =
                                                               true};
@@ -183,9 +219,9 @@ TEST_F(ParserDatabaseIntegrationTest, ParsesMixedFilesWithClangDatabase)
          "HeaderOnlyStruct from header_only.h)";
 }
 
-TEST_F(ParserDatabaseIntegrationTest, ParsesHeadersWithIARDatabase)
+TEST_F(ParserDatabaseIntegrationTest, ParsesHeadersWithIarDatabase)
 {
-  alchemy::testing::utils::createIARDatabase(buildDir, projectDir);
+  alchemy::testing::utils::createIarDatabase(buildDir, projectDir);
 
   const std::vector<std::filesystem::path> HeaderFiles = {
       projectDir / "inc" / "config.h",
@@ -214,9 +250,9 @@ TEST_F(ParserDatabaseIntegrationTest, ParsesHeadersWithIARDatabase)
       << "Should find exactly 3 structs (Config, Util, HeaderOnlyStruct)";
 }
 
-TEST_F(ParserDatabaseIntegrationTest, ParsesHeadersWithMSVCDatabase)
+TEST_F(ParserDatabaseIntegrationTest, ParsesHeadersWithMsvcDatabase)
 {
-  alchemy::testing::utils::createMSVCDatabase(buildDir, projectDir);
+  alchemy::testing::utils::createMsvcDatabase(buildDir, projectDir);
 
   const std::vector<std::filesystem::path> HeaderFiles = {
       projectDir / "inc" / "config.h",

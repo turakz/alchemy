@@ -1,4 +1,6 @@
 // src/metrics_reporter.cpp
+#include "reporting/metrics_reporter.hpp"
+
 // std
 #include <type_traits>
 #include <variant>
@@ -9,10 +11,9 @@
 // local
 #include "metrics/metrics.hpp"
 #include "metrics/salign_metrics.hpp"
-#include "reporting/metrics_reporter.hpp"
 #include "reporting/salign_reporter.hpp"
 
-// dispatcher - separates variants and calls type-specific reporters
+// dispatcher -> separates variants and calls type-specific reporters
 void
 alchemy::metrics::reporter::reportMetrics(
     const std::vector<alchemy::metrics::Metrics>& metrics)

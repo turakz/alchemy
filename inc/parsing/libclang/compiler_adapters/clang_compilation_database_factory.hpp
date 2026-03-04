@@ -1,10 +1,11 @@
-// inc/parsing/libclang/compiler_adapters/clang_compilation_database_factory.cpp
+// inc/parsing/libclang/compiler_adapters/clang_compilation_database_factory.hpp
 #ifndef ALCHEMY_PARSING_LIBCLANG_COMPILER_ADAPTERS_CLANG_COMPILATION_DATABASE_FACTORY_HPP
 #define ALCHEMY_PARSING_LIBCLANG_COMPILER_ADAPTERS_CLANG_COMPILATION_DATABASE_FACTORY_HPP
 // std
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 // 3rd party
 #include <clang/Tooling/CompilationDatabase.h>
@@ -17,6 +18,7 @@ namespace alchemy::parser::libclang::adapters {
 struct CompilationDatabaseInfo {
   std::unique_ptr<clang::tooling::CompilationDatabase> database;
   std::string compilerType;
+  std::vector<std::string> allIncludePaths;
 };
 
 class CompilationDatabaseFactory {

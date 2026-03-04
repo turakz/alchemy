@@ -1,22 +1,47 @@
 // src/salign_reporter.cpp
+#include "reporting/salign_reporter.hpp"
+
 // std
 #include <cstddef>
 
 #include <algorithm>
 #include <filesystem>
 #include <iterator>
-#include <numeric>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 // 3rd party
-#include "app/color.hpp"
-#include "fmt/core.h"
-#include "metrics/salign_metrics.hpp"
+#include <fmt/core.h>
 
 // local
-#include "reporting/salign_reporter.hpp"
+#include "app/color.hpp"
+#include "metrics/salign_metrics.hpp"
+
+// render a table section: subtitle + column header + rows + bottom separator
+void
+alchemy::metrics::reporter::detail::printMetricsTable(
+    const std::string& subtitle,
+    const std::vector<alchemy::metrics::reporter::detail::MetricsRow>& rows)
+{
+  fmt::print("\n{}\n", subtitle);
+  fmt::print("{:─<80}\n", "");
+  fmt::print("{:<18} │ {:>12} │ {:>12} │ {:<30}\n",
+             "Metric",
+             "Current",
+             "Optimized",
+             "Improvement");
+  fmt::print("{:─<80}\n", "");
+  for (const auto& row : rows)
+  {
+    fmt::print("{:<18} │ {:>12} │ {:>12} │ {:<30}\n",
+               row.label,
+               row.current,
+               row.optimized,
+               row.improvement);
+  }
+  fmt::print("{:─<80}\n", "");
+}
 
 // helper: format percentage change for display
 std::string
@@ -25,23 +50,34 @@ alchemy::metrics::reporter::detail::formatPercentageChange(
 {
   if (current == 0)
   {
-    return "(n/a)";
+    return fmt::format("{}(n/a){}",
+                       alchemy::color::ansi::Magenta,
+                       alchemy::color::ansi::Reset);
   }
 
   std::size_t change =
       current > optimized ? current - optimized : optimized - current;
   double percent =
-      (static_cast<double>(change) / static_cast<double>(current)) * 100.0;
+      alchemy::metrics::detail::calculatePercentage(change, current);
 
   if (optimized < current)
   {
-    return fmt::format("-{} bytes (-{:.1f}%)", change, percent);
+    return fmt::format("{}-{} bytes (-{:.1f}%){}",
+                       alchemy::color::ansi::BrightGreen,
+                       change,
+                       percent,
+                       alchemy::color::ansi::Reset);
   }
   if (optimized > current)
   {
-    return fmt::format("+{} bytes (+{:.1f}%)", change, percent);
+    return fmt::format("{}+{} bytes (+{:.1f}%){}",
+                       alchemy::color::ansi::Magenta,
+                       change,
+                       percent,
+                       alchemy::color::ansi::Reset);
   }
-  return "(same)";
+  return fmt::format(
+      "{}(same){}", alchemy::color::ansi::Magenta, alchemy::color::ansi::Reset);
 }
 
 // helper: format padding improvement for display
@@ -52,24 +88,27 @@ alchemy::metrics::reporter::detail::formatPaddingImprovement(
   if (optimizedPadding > currentPadding)
   {
     std::size_t increase = optimizedPadding - currentPadding;
-    double percent = currentPadding > 0
-                         ? (static_cast<double>(increase) /
-                            static_cast<double>(currentPadding)) *
-                               100.0
-                         : 0.0;
-    return fmt::format("+{} bytes (+{:.1f}%)", increase, percent);
+    double percent =
+        alchemy::metrics::detail::calculatePercentage(increase, currentPadding);
+    return fmt::format("{}+{} bytes (+{:.1f}%){}",
+                       alchemy::color::ansi::Magenta,
+                       increase,
+                       percent,
+                       alchemy::color::ansi::Reset);
   }
   if (optimizedPadding < currentPadding)
   {
     std::size_t decrease = currentPadding - optimizedPadding;
-    double percent = currentPadding > 0
-                         ? (static_cast<double>(decrease) /
-                            static_cast<double>(currentPadding)) *
-                               100.0
-                         : 0.0;
-    return fmt::format("-{} bytes (-{:.1f}%)", decrease, percent);
+    double percent =
+        alchemy::metrics::detail::calculatePercentage(decrease, currentPadding);
+    return fmt::format("{}-{} bytes (-{:.1f}%){}",
+                       alchemy::color::ansi::BrightGreen,
+                       decrease,
+                       percent,
+                       alchemy::color::ansi::Reset);
   }
-  return "(same)";
+  return fmt::format(
+      "{}(same){}", alchemy::color::ansi::Magenta, alchemy::color::ansi::Reset);
 }
 
 // helper: accumulate common stats from a range of metrics
@@ -84,61 +123,22 @@ alchemy::metrics::reporter::detail::accumulateStats(
     return stats;
   }
 
-  stats.totalSizeCurrent = std::accumulate(
-      metrics.begin(),
-      metrics.end(),
-      static_cast<std::size_t>(0),
-      [](auto sum, const auto& m) { return sum + m.naturalTotalSize; });
-
-  stats.totalSizeOptimized = std::accumulate(
-      metrics.begin(),
-      metrics.end(),
-      static_cast<std::size_t>(0),
-      [](auto sum, const auto& m) { return sum + m.optimizedSize; });
-
-  stats.totalDataSize = std::accumulate(
-      metrics.begin(),
-      metrics.end(),
-      static_cast<std::size_t>(0),
-      [](auto sum, const auto& m) { return sum + m.currentDataSize; });
-
-  stats.wastedPaddingCurrent = std::accumulate(
-      metrics.begin(),
-      metrics.end(),
-      static_cast<std::size_t>(0),
-      [](auto sum, const auto& m) { return sum + m.currentWastedBytes; });
-
-  stats.wastedPaddingOptimized = std::accumulate(
-      metrics.begin(),
-      metrics.end(),
-      static_cast<std::size_t>(0),
-      [](auto sum, const auto& m) { return sum + m.optimizedWaste; });
-
-  stats.maxAlignment =
-      std::accumulate(metrics.begin(),
-                      metrics.end(),
-                      static_cast<std::size_t>(0),
-                      [](auto maxAlign, const auto& m) {
-                        return std::max(maxAlign, m.naturalAlignment);
-                      });
-
-  const double count = static_cast<double>(metrics.size());
-  stats.avgCacheUtilCurrent = std::accumulate(metrics.begin(),
-                                              metrics.end(),
-                                              0.0,
-                                              [](double sum, const auto& m) {
-                                                return sum + m.currentCacheUtil;
-                                              }) /
-                              count;
-
-  stats.avgCacheUtilOptimized =
-      std::accumulate(metrics.begin(),
-                      metrics.end(),
-                      0.0,
-                      [](double sum, const auto& m) {
-                        return sum + m.optimizedCacheUtil;
-                      }) /
-      count;
+  double sumCacheUtilCurrent = 0.0;
+  double sumCacheUtilOptimized = 0.0;
+  for (const auto& m : metrics)
+  {
+    stats.totalSizeCurrent += m.naturalTotalSize;
+    stats.totalSizeOptimized += m.optimizedSize;
+    stats.totalDataSize += m.currentDataSize;
+    stats.wastedPaddingCurrent += m.currentWastedBytes;
+    stats.wastedPaddingOptimized += m.optimizedWaste;
+    stats.maxAlignment = std::max(stats.maxAlignment, m.naturalAlignment);
+    sumCacheUtilCurrent += m.currentCacheUtil;
+    sumCacheUtilOptimized += m.optimizedCacheUtil;
+  }
+  const auto Count = static_cast<double>(metrics.size());
+  stats.avgCacheUtilCurrent = sumCacheUtilCurrent / Count;
+  stats.avgCacheUtilOptimized = sumCacheUtilOptimized / Count;
 
   return stats;
 }
@@ -148,7 +148,7 @@ std::vector<alchemy::metrics::reporter::detail::FileStats>
 alchemy::metrics::reporter::detail::aggregateByFile(
     const std::vector<alchemy::metrics::detail::SAlignMetrics>& optimizable)
 {
-  std::unordered_map<std::filesystem::path,
+  std::unordered_map<std::string,
                      std::vector<alchemy::metrics::detail::SAlignMetrics>>
       byFile;
   for (const auto& metric : optimizable)
@@ -159,20 +159,13 @@ alchemy::metrics::reporter::detail::aggregateByFile(
   std::vector<alchemy::metrics::reporter::detail::FileStats> result;
   for (const auto& [file, fileMetrics] : byFile)
   {
-    alchemy::metrics::reporter::detail::AlignmentStats accumulated =
+    const alchemy::metrics::reporter::detail::AlignmentStats Accumulated =
         alchemy::metrics::reporter::detail::accumulateStats(fileMetrics);
 
     alchemy::metrics::reporter::detail::FileStats stats;
+    static_cast<AlignmentStats&>(stats) = Accumulated;
     stats.file = file;
     stats.structCount = fileMetrics.size();
-    stats.totalSizeCurrent = accumulated.totalSizeCurrent;
-    stats.totalSizeOptimized = accumulated.totalSizeOptimized;
-    stats.totalDataSize = accumulated.totalDataSize;
-    stats.wastedPaddingCurrent = accumulated.wastedPaddingCurrent;
-    stats.wastedPaddingOptimized = accumulated.wastedPaddingOptimized;
-    stats.maxAlignment = accumulated.maxAlignment;
-    stats.avgCacheUtilCurrent = accumulated.avgCacheUtilCurrent;
-    stats.avgCacheUtilOptimized = accumulated.avgCacheUtilOptimized;
 
     result.push_back(stats);
   }
@@ -194,41 +187,27 @@ alchemy::metrics::reporter::detail::reportPerFileSummary(
   auto fileStats = detail::aggregateByFile(optimizable);
 
   fmt::print("\nalchemy::{}salign{}::by_file\n",
-             alchemy::color::ansi::BrightGreen,
+             alchemy::color::ansi::BoldBrightGreen,
              alchemy::color::ansi::Reset);
   fmt::print("{:═<80}\n", "");
 
   for (const auto& stats : fileStats)
   {
-    std::string sizeChange =
-        alchemy::metrics::reporter::detail::formatPercentageChange(
-            stats.totalSizeCurrent, stats.totalSizeOptimized);
-    std::string paddingImprovement =
-        alchemy::metrics::reporter::detail::formatPaddingImprovement(
-            stats.wastedPaddingCurrent, stats.wastedPaddingOptimized);
-
-    fmt::print("\n{} ({} struct{})\n",
-               stats.file.filename().string(),
-               stats.structCount,
-               stats.structCount == 1 ? "" : "s");
-    fmt::print("{:─<80}\n", "");
-    fmt::print("{:<18} │ {:>12} │ {:>12} │ {:<30}\n",
-               "Metric",
-               "Current",
-               "Optimized",
-               "Improvement");
-    fmt::print("{:─<80}\n", "");
-    fmt::print("{:<18} │ {:>12} │ {:>12} │ {:<30}\n",
-               "Total Size",
-               fmt::format("{} bytes", stats.totalSizeCurrent),
-               fmt::format("{} bytes", stats.totalSizeOptimized),
-               sizeChange);
-    fmt::print("{:<18} │ {:>12} │ {:>12} │ {:<30}\n",
-               "Wasted Padding",
-               fmt::format("{} bytes", stats.wastedPaddingCurrent),
-               fmt::format("{} bytes", stats.wastedPaddingOptimized),
-               paddingImprovement);
-    fmt::print("{:─<80}\n", "");
+    alchemy::metrics::reporter::detail::printMetricsTable(
+        fmt::format("{} ({} struct{})",
+                    std::filesystem::path(stats.file).filename().string(),
+                    stats.structCount,
+                    stats.structCount == 1 ? "" : "s"),
+        {{"Total Size",
+          fmt::format("{} bytes", stats.totalSizeCurrent),
+          fmt::format("{} bytes", stats.totalSizeOptimized),
+          alchemy::metrics::reporter::detail::formatPercentageChange(
+              stats.totalSizeCurrent, stats.totalSizeOptimized)},
+         {"Wasted Padding",
+          fmt::format("{} bytes", stats.wastedPaddingCurrent),
+          fmt::format("{} bytes", stats.wastedPaddingOptimized),
+          alchemy::metrics::reporter::detail::formatPaddingImprovement(
+              stats.wastedPaddingCurrent, stats.wastedPaddingOptimized)}});
   }
 
   fmt::print("{:═<80}\n", "");
@@ -240,9 +219,10 @@ alchemy::metrics::reporter::detail::sortBySavings(
     const std::vector<alchemy::metrics::detail::SAlignMetrics>& metrics)
 {
   auto sorted = metrics;
-  std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
-    return a.possibleSavings > b.possibleSavings;
-  });
+  std::sort(
+      std::begin(sorted), std::end(sorted), [](const auto& a, const auto& b) {
+        return a.possibleSavings > b.possibleSavings;
+      });
   return sorted;
 }
 
@@ -257,7 +237,7 @@ alchemy::metrics::reporter::detail::reportPerStructSummary(
 
   fmt::print(
       "\nalchemy::{}salign{}::by_struct (top {} optimization opportunities)\n",
-      alchemy::color::ansi::BrightGreen,
+      alchemy::color::ansi::BoldBrightGreen,
       alchemy::color::ansi::Reset,
       displayCount);
   fmt::print("{:═<80}\n", "");
@@ -265,58 +245,36 @@ alchemy::metrics::reporter::detail::reportPerStructSummary(
   for (std::size_t i = 0; i < displayCount; ++i)
   {
     const auto& m = sorted[i];
-    std::string sizeChange =
-        alchemy::metrics::reporter::detail::formatPercentageChange(
-            m.naturalTotalSize, m.optimizedSize);
-    std::string paddingImprovement =
-        alchemy::metrics::reporter::detail::formatPaddingImprovement(
-            m.currentWastedBytes, m.optimizedWaste);
+    std::vector<alchemy::metrics::reporter::detail::MetricsRow> rows = {
+        {"Total Size",
+         fmt::format("{} bytes", m.naturalTotalSize),
+         fmt::format("{} bytes", m.optimizedSize),
+         alchemy::metrics::reporter::detail::formatPercentageChange(
+             m.naturalTotalSize, m.optimizedSize)},
+        {"Wasted Padding",
+         fmt::format("{} bytes", m.currentWastedBytes),
+         fmt::format("{} bytes", m.optimizedWaste),
+         alchemy::metrics::reporter::detail::formatPaddingImprovement(
+             m.currentWastedBytes, m.optimizedWaste)},
+        {"Cache Util",
+         fmt::format("{:.1f}%", m.currentCacheUtil),
+         fmt::format("{:.1f}%", m.optimizedCacheUtil),
+         fmt::format("{:+.1f}%", m.optimizedCacheUtil - m.currentCacheUtil)}};
 
-    fmt::print("\n{} ({})\n", m.structName, m.sourceFile.filename().string());
-    fmt::print("{:─<80}\n", "");
-    fmt::print("{:<18} │ {:>12} │ {:>12} │ {:<30}\n",
-               "Metric",
-               "Current",
-               "Optimized",
-               "Improvement");
-    fmt::print("{:─<80}\n", "");
-    fmt::print("{:<18} │ {:>12} │ {:>12} │ {:<30}\n",
-               "Total Size",
-               fmt::format("{} bytes", m.naturalTotalSize),
-               fmt::format("{} bytes", m.optimizedSize),
-               sizeChange);
-    fmt::print("{:<18} │ {:>12} │ {:>12} │ {:<30}\n",
-               "Wasted Padding",
-               fmt::format("{} bytes", m.currentWastedBytes),
-               fmt::format("{} bytes", m.optimizedWaste),
-               paddingImprovement);
-
-    // Cache metrics (NEW)
-    fmt::print(
-        "{:<18} │ {:>12} │ {:>12} │ {:<30}\n",
-        "SPCL Score",
-        fmt::format("{:.1f}/line", m.currentSpclScore),
-        fmt::format("{:.1f}/line", m.optimizedSpclScore),
-        fmt::format("+{:.1f}/line", m.optimizedSpclScore - m.currentSpclScore));
-    fmt::print(
-        "{:<18} │ {:>12} │ {:>12} │ {:<30}\n",
-        "Cache Util",
-        fmt::format("{:.1f}%", m.currentCacheUtil),
-        fmt::format("{:.1f}%", m.optimizedCacheUtil),
-        fmt::format("+{:.1f}%", m.optimizedCacheUtil - m.currentCacheUtil));
-
-    // Array allocation hint (only show if > 1)
     if (m.optimizedCacheSize > m.optimizedSize)
     {
-      fmt::print("{:<18} │ {:>12} │ {:>12} │ {:<30}\n",
-                 "Array Hint",
-                 "─",
-                 fmt::format("{} bytes", m.optimizedCacheSize),
-                 fmt::format("multiples of {}",
-                             m.optimizedCacheSize / m.optimizedSize));
+      rows.push_back({"Array Hint",
+                      "─",
+                      fmt::format("{} bytes", m.optimizedCacheSize),
+                      fmt::format("multiples of {}",
+                                  m.optimizedCacheSize / m.optimizedSize)});
     }
 
-    fmt::print("{:─<80}\n", "");
+    alchemy::metrics::reporter::detail::printMetricsTable(
+        fmt::format("{} ({})",
+                    m.structName,
+                    std::filesystem::path(m.sourceFile).filename().string()),
+        rows);
   }
 
   fmt::print("{:═<80}\n", "");
@@ -328,20 +286,13 @@ alchemy::metrics::reporter::detail::computeGlobalStats(
     const std::vector<alchemy::metrics::detail::SAlignMetrics>& optimizable,
     std::size_t totalStructs)
 {
-  alchemy::metrics::reporter::detail::AlignmentStats accumulated =
+  const alchemy::metrics::reporter::detail::AlignmentStats Accumulated =
       alchemy::metrics::reporter::detail::accumulateStats(optimizable);
 
   alchemy::metrics::reporter::detail::GlobalStats stats;
+  static_cast<AlignmentStats&>(stats) = Accumulated;
   stats.totalStructs = totalStructs;
   stats.optimizableStructs = optimizable.size();
-  stats.totalSizeCurrent = accumulated.totalSizeCurrent;
-  stats.totalSizeOptimized = accumulated.totalSizeOptimized;
-  stats.totalDataSize = accumulated.totalDataSize;
-  stats.wastedPaddingCurrent = accumulated.wastedPaddingCurrent;
-  stats.wastedPaddingOptimized = accumulated.wastedPaddingOptimized;
-  stats.maxAlignment = accumulated.maxAlignment;
-  stats.avgCacheUtilCurrent = accumulated.avgCacheUtilCurrent;
-  stats.avgCacheUtilOptimized = accumulated.avgCacheUtilOptimized;
 
   return stats;
 }
@@ -364,11 +315,13 @@ alchemy::metrics::reporter::detail::reportGlobalSummary(
 
   fmt::print(
       "\nalchemy::{}salign{}::summary (analyzed {} structs, {} optimizable)\n",
-      alchemy::color::ansi::BrightGreen,
+      alchemy::color::ansi::BoldBrightGreen,
       alchemy::color::ansi::Reset,
       stats.totalStructs,
       stats.optimizableStructs);
   fmt::print("{:═<80}\n", "");
+  // global summary uses ═ separators, so we print column header + rows inline
+  // rather than through printMetricsTable (which uses ─ separators)
   fmt::print("{:<18} │ {:>12} │ {:>12} │ {:<30}\n",
              "Metric",
              "Current",
@@ -390,7 +343,7 @@ alchemy::metrics::reporter::detail::reportGlobalSummary(
       "Avg Cache Util",
       fmt::format("{:.1f}%", stats.avgCacheUtilCurrent),
       fmt::format("{:.1f}%", stats.avgCacheUtilOptimized),
-      fmt::format("+{:.1f}%",
+      fmt::format("{:+.1f}%",
                   stats.avgCacheUtilOptimized - stats.avgCacheUtilCurrent));
   fmt::print("{:═<80}\n", "");
   fmt::print("\n");
@@ -416,11 +369,33 @@ alchemy::metrics::reporter::SAlignReporter::report(
   if (metrics.empty())
   {
     fmt::print("alchemy::{}salign{}::{}no optimization opportunities found{}\n",
-               alchemy::color::ansi::BrightGreen,
+               alchemy::color::ansi::BoldBrightGreen,
                alchemy::color::ansi::Reset,
                alchemy::color::ansi::Magenta,
                alchemy::color::ansi::Reset);
     return;
+  }
+
+  // report skipped structs (e.g., #pragma pack)
+  const auto SkippedCount = std::count_if(
+      metrics.begin(), metrics.end(), [](const auto& m) { return m.skipped; });
+  if (SkippedCount > 0)
+  {
+    fmt::print(
+        "alchemy::{}salign{}::skipped {}{}{} {}#pragma packed{} struct{} "
+        "(field order defines binary layout)\n"
+        "alchemy::{}hint{}: remove #pragma pack before running alchemy if "
+        "the struct is not serialized\n",
+        alchemy::color::ansi::BoldBrightGreen,
+        alchemy::color::ansi::Reset,
+        alchemy::color::ansi::Yellow,
+        SkippedCount,
+        alchemy::color::ansi::Reset,
+        alchemy::color::ansi::Yellow,
+        alchemy::color::ansi::Reset,
+        SkippedCount == 1 ? "" : "s",
+        alchemy::color::ansi::Cyan,
+        alchemy::color::ansi::Reset);
   }
 
   auto optimizable =
@@ -428,16 +403,11 @@ alchemy::metrics::reporter::SAlignReporter::report(
 
   if (optimizable.empty())
   {
-    fmt::print("alchemy::{}salign{}::all {} structs already {}optimized{}\n"
-               "alchemy::{}tip{}: if your structs are #pragma packed, consider "
-               "temporarily removing the preprocessor for structs that "
-               "encapsulate other structs, and then re-running alchemy\n",
-               alchemy::color::ansi::BrightGreen,
+    fmt::print("alchemy::{}salign{}::all {} structs already {}optimized{}\n",
+               alchemy::color::ansi::BoldBrightGreen,
                alchemy::color::ansi::Reset,
                metrics.size(),
-               alchemy::color::ansi::BrightGreen,
-               alchemy::color::ansi::Reset,
-               alchemy::color::ansi::Cyan,
+               alchemy::color::ansi::BoldBrightGreen,
                alchemy::color::ansi::Reset);
     return;
   }

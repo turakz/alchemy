@@ -2,8 +2,6 @@
 // unit tests for ClangParser
 
 // std
-#include <chrono>
-
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -28,11 +26,8 @@ protected:
   SetUp() override
   {
     // create temporary test directory with valid C file
-    tempDir = std::filesystem::temp_directory_path() /
-              "alchemy_clang_parser_test" /
-              std::to_string(
-                  std::chrono::steady_clock::now().time_since_epoch().count());
-    std::filesystem::create_directories(tempDir);
+    tempDir = alchemy::testing::utils::createTempTestDirectory(
+        "alchemy_clang_parser_unit_test");
 
     testSourceFile = utils::createTestFile(
         tempDir, "test.c", "struct TestStruct { int x; };");
@@ -86,12 +81,12 @@ TEST_F(ClangParserTest, CreatedParserImplementsInterface)
   auto result = alchemy::parser::ClangParser::create(Sources, tempDir);
   ASSERT_TRUE(result.valid());
 
-  auto parser = std::move(result.value());
+  auto parser = std::move(result).value();
   alchemy::parser::ParsingRuleAdapter* adapter = parser.get();
 
   ASSERT_NE(adapter, nullptr) << "alchemy::testing::unit::parser should be "
                                  "castable to ParsingRuleAdapter";
-  ASSERT_EQ(adapter->getName(), "GCC/Clang")
+  ASSERT_EQ(adapter->getName(), "Clang")
       << "alchemy::testing::unit::polymorphic getName() should work";
 }
 
@@ -120,11 +115,8 @@ TEST_F(ClangParserTest, ParseRespectsStructParsingFlag)
 TEST_F(ClangParserTest, CreateHandlesMalformedCompilationDatabase)
 {
   // create directory with malformed compile_commands.json
-  auto malformedDir =
-      std::filesystem::temp_directory_path() / "alchemy_malformed_test" /
-      std::to_string(
-          std::chrono::steady_clock::now().time_since_epoch().count());
-  std::filesystem::create_directories(malformedDir);
+  auto malformedDir = alchemy::testing::utils::createTempTestDirectory(
+      "alchemy_malformed_test");
 
   // create source file
   auto sourceFile =
@@ -154,10 +146,7 @@ TEST_F(ClangParserTest, CreateHandlesMissingCompilationDatabase)
 {
   // create directory without compile_commands.json
   auto noDbDir =
-      std::filesystem::temp_directory_path() / "alchemy_no_db_test" /
-      std::to_string(
-          std::chrono::steady_clock::now().time_since_epoch().count());
-  std::filesystem::create_directories(noDbDir);
+      alchemy::testing::utils::createTempTestDirectory("alchemy_no_db_test");
 
   // create source file but no compilation database
   auto sourceFile =
@@ -182,7 +171,7 @@ TEST_F(ClangParserTest, ParseCanBeCalledMultipleTimes)
   auto createResult = alchemy::parser::ClangParser::create(Sources, tempDir);
   ASSERT_TRUE(createResult.valid());
 
-  auto parser = std::move(createResult.value());
+  auto parser = std::move(createResult).value();
 
   alchemy::parser::ParsingRequirements requirements;
   requirements.needsStructParsing = true;

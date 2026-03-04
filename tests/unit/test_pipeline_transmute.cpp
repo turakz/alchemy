@@ -1,8 +1,6 @@
 // tests/unit/test_pipeline_transmute.cpp
 
 // std
-#include <chrono>
-
 #include <filesystem>
 #include <string>
 #include <unordered_map>
@@ -24,13 +22,8 @@ protected:
   SetUp() override
   {
     // create temp directory for tests
-    tempDir = std::filesystem::temp_directory_path() /
-              "alchemy_transmute_test" /
-              std::to_string(
-                  std::chrono::steady_clock::now().time_since_epoch().count());
-    std::filesystem::create_directories(tempDir);
-    buildDir = tempDir / "build";
-    std::filesystem::create_directories(buildDir);
+    tempDir = alchemy::testing::utils::createTempTestDirectory(
+        "alchemy_transmute_test");
   }
 
   void
@@ -43,7 +36,6 @@ protected:
   }
 
   std::filesystem::path tempDir;
-  std::filesystem::path buildDir;
 };
 
 // ============================================================================
@@ -52,8 +44,7 @@ protected:
 
 TEST_F(PipelineTransmuteTest, ValidateTransmutePassesForEmptyRecipes)
 {
-  const std::unordered_map<std::filesystem::path,
-                           std::vector<alchemy::operation::Recipe>>
+  const std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       EmptyRecipes;
 
   auto result = alchemy::pipeline::validateTransmute(EmptyRecipes);
@@ -67,11 +58,12 @@ TEST_F(PipelineTransmuteTest, ValidateTransmutePassesForValidFiles)
   auto file1 = utils::createTestFile(tempDir, "file1.h", "// file1");
   auto file2 = utils::createTestFile(tempDir, "file2.h", "// file2");
 
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipes;
-  recipes[file1] = {utils::createRecipe(file1, 0, 10, "// refactored")};
-  recipes[file2] = {utils::createRecipe(file2, 0, 10, "// refactored")};
+  recipes[file1.string()] = {
+      utils::createRecipe(file1, 0, 10, "// refactored")};
+  recipes[file2.string()] = {
+      utils::createRecipe(file2, 0, 10, "// refactored")};
 
   auto result = alchemy::pipeline::validateTransmute(recipes);
 
@@ -83,10 +75,9 @@ TEST_F(PipelineTransmuteTest, ValidateTransmuteFailsForNonexistentFile)
 {
   auto nonexistentFile = tempDir / "missing.h";
 
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipes;
-  recipes[nonexistentFile] = {
+  recipes[nonexistentFile.string()] = {
       utils::createRecipe(nonexistentFile, 0, 10, "// refactored")};
 
   auto result = alchemy::pipeline::validateTransmute(recipes);
@@ -100,10 +91,10 @@ TEST_F(PipelineTransmuteTest, ValidateTransmuteFailsForDirectory)
   auto directory = tempDir / "subdir";
   std::filesystem::create_directory(directory);
 
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipes;
-  recipes[directory] = {utils::createRecipe(directory, 0, 10, "// code")};
+  recipes[directory.string()] = {
+      utils::createRecipe(directory, 0, 10, "// code")};
 
   auto result = alchemy::pipeline::validateTransmute(recipes);
 
@@ -122,10 +113,9 @@ TEST_F(PipelineTransmuteTest, ValidateTransmuteFailsForReadOnlyFile)
                                    std::filesystem::perms::others_read,
                                std::filesystem::perm_options::replace);
 
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipes;
-  recipes[readonlyFile] = {
+  recipes[readonlyFile.string()] = {
       utils::createRecipe(readonlyFile, 0, 10, "// refactored")};
 
   auto result = alchemy::pipeline::validateTransmute(recipes);
@@ -145,12 +135,10 @@ TEST_F(PipelineTransmuteTest, ValidateTransmuteFailsForReadOnlyFile)
 
 TEST_F(PipelineTransmuteTest, ExecuteTransmuteHandlesEmptyRecipes)
 {
-  const std::unordered_map<std::filesystem::path,
-                           std::vector<alchemy::operation::Recipe>>
+  const std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       EmptyRecipes;
 
-  auto result =
-      alchemy::pipeline::executeTransmute(EmptyRecipes, buildDir, false);
+  auto result = alchemy::pipeline::executeTransmute(EmptyRecipes, false);
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::empty recipes should succeed";
@@ -164,12 +152,12 @@ TEST_F(PipelineTransmuteTest, ExecuteTransmuteAppliesSingleFileRecipes)
 {
   auto sourceFile = utils::createTestFile(tempDir, "source.h", "int x;");
 
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipes;
-  recipes[sourceFile] = {utils::createRecipe(sourceFile, 0, 6, "double y;")};
+  recipes[sourceFile.string()] = {
+      utils::createRecipe(sourceFile, 0, 6, "double y;")};
 
-  auto result = alchemy::pipeline::executeTransmute(recipes, buildDir, false);
+  auto result = alchemy::pipeline::executeTransmute(recipes, false);
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::single file transmutation should succeed";
@@ -189,13 +177,12 @@ TEST_F(PipelineTransmuteTest, ExecuteTransmuteAppliesMultipleFilesRecipes)
   auto file1 = utils::createTestFile(tempDir, "file1.h", "int a;");
   auto file2 = utils::createTestFile(tempDir, "file2.h", "int b;");
 
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipes;
-  recipes[file1] = {utils::createRecipe(file1, 0, 6, "float x;")};
-  recipes[file2] = {utils::createRecipe(file2, 0, 6, "float y;")};
+  recipes[file1.string()] = {utils::createRecipe(file1, 0, 6, "float x;")};
+  recipes[file2.string()] = {utils::createRecipe(file2, 0, 6, "float y;")};
 
-  auto result = alchemy::pipeline::executeTransmute(recipes, buildDir, false);
+  auto result = alchemy::pipeline::executeTransmute(recipes, false);
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::multiple files transmutation should succeed";
@@ -216,13 +203,13 @@ TEST_F(PipelineTransmuteTest, ExecuteTransmuteAppliesMultipleRecipesPerFile)
   auto sourceFile =
       utils::createTestFile(tempDir, "multi.h", "int a;\nint b;\n");
 
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipes;
-  recipes[sourceFile] = {utils::createRecipe(sourceFile, 0, 6, "float x;"),
-                         utils::createRecipe(sourceFile, 7, 6, "float y;")};
+  recipes[sourceFile.string()] = {
+      utils::createRecipe(sourceFile, 0, 6, "float x;"),
+      utils::createRecipe(sourceFile, 7, 6, "float y;")};
 
-  auto result = alchemy::pipeline::executeTransmute(recipes, buildDir, false);
+  auto result = alchemy::pipeline::executeTransmute(recipes, false);
 
   ASSERT_TRUE(result.valid()) << "alchemy::testing::unit::multiple recipes per "
                                  "file transmutation should succeed";
@@ -242,12 +229,12 @@ TEST_F(PipelineTransmuteTest, ExecuteTransmuteDryRunDoesNotMutateFiles)
   auto sourceFile = utils::createTestFile(tempDir, "dryrun.h", "int x;");
   const std::string OriginalContent = utils::readFile(sourceFile);
 
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipes;
-  recipes[sourceFile] = {utils::createRecipe(sourceFile, 0, 6, "double y;")};
+  recipes[sourceFile.string()] = {
+      utils::createRecipe(sourceFile, 0, 6, "double y;")};
 
-  auto result = alchemy::pipeline::executeTransmute(recipes, buildDir, true);
+  auto result = alchemy::pipeline::executeTransmute(recipes, true);
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::dry run should succeed";
@@ -268,11 +255,10 @@ TEST_F(PipelineTransmuteTest, ExecuteTransmuteDryRunDoesNotMutateFiles)
 
 TEST_F(PipelineTransmuteTest, TransmuteOrchestrationPassesForEmptyRecipes)
 {
-  const std::unordered_map<std::filesystem::path,
-                           std::vector<alchemy::operation::Recipe>>
+  const std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       EmptyRecipes;
 
-  auto result = alchemy::pipeline::transmute(EmptyRecipes, buildDir, false);
+  auto result = alchemy::pipeline::transmute(EmptyRecipes, false);
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::transmute with empty recipes should succeed";
@@ -286,13 +272,12 @@ TEST_F(PipelineTransmuteTest, TransmuteOrchestrationFailsIfValidationFails)
 {
   auto nonexistentFile = tempDir / "missing.h";
 
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipes;
-  recipes[nonexistentFile] = {
+  recipes[nonexistentFile.string()] = {
       utils::createRecipe(nonexistentFile, 0, 10, "// code")};
 
-  auto result = alchemy::pipeline::transmute(recipes, buildDir, false);
+  auto result = alchemy::pipeline::transmute(recipes, false);
 
   ASSERT_TRUE(result.invalid())
       << "alchemy::testing::unit::transmute should fail if validation fails";
@@ -302,12 +287,12 @@ TEST_F(PipelineTransmuteTest, TransmuteOrchestrationSucceedsForValidRecipes)
 {
   auto sourceFile = utils::createTestFile(tempDir, "valid.h", "int x;");
 
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipes;
-  recipes[sourceFile] = {utils::createRecipe(sourceFile, 0, 6, "double y;")};
+  recipes[sourceFile.string()] = {
+      utils::createRecipe(sourceFile, 0, 6, "double y;")};
 
-  auto result = alchemy::pipeline::transmute(recipes, buildDir, false);
+  auto result = alchemy::pipeline::transmute(recipes, false);
 
   ASSERT_TRUE(result.valid()) << "alchemy::testing::unit::transmute should "
                                  "succeed for valid recipes";
@@ -327,12 +312,12 @@ TEST_F(PipelineTransmuteTest, TransmuteOrchestrationDryRunDoesNotMutate)
   auto sourceFile = utils::createTestFile(tempDir, "dryrun.h", "int x;");
   const std::string OriginalContent = utils::readFile(sourceFile);
 
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipes;
-  recipes[sourceFile] = {utils::createRecipe(sourceFile, 0, 6, "double y;")};
+  recipes[sourceFile.string()] = {
+      utils::createRecipe(sourceFile, 0, 6, "double y;")};
 
-  auto result = alchemy::pipeline::transmute(recipes, buildDir, true);
+  auto result = alchemy::pipeline::transmute(recipes, true);
 
   ASSERT_TRUE(result.valid()) << "alchemy::testing::unit::transmute dry run "
                                  "should succeed";

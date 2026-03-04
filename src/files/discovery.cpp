@@ -1,6 +1,9 @@
 // src/files/discovery.cpp
+#include "files/discovery.hpp"
+
 // std
 #include <cstddef>
+#include <cstdio>
 
 #include <algorithm>
 #include <filesystem>
@@ -11,12 +14,11 @@
 #include <vector>
 
 // 3rd party
-#include "fmt/core.h"
+#include <fmt/core.h>
 
 // local
 #include "app/color.hpp"
 #include "app/core/core.hpp"
-#include "files/discovery.hpp"
 
 // helper: find common ancestor directory of multiple paths
 std::filesystem::path
@@ -61,14 +63,16 @@ alchemy::discovery::buildDiscoveryConfig(
   // combine all patterns for extension and recursive analysis
   std::vector<std::string> allPatterns;
   allPatterns.reserve(includePatterns.size() + excludePatterns.size());
-  allPatterns.insert(
-      allPatterns.end(), includePatterns.begin(), includePatterns.end());
-  allPatterns.insert(
-      allPatterns.end(), excludePatterns.begin(), excludePatterns.end());
+  allPatterns.insert(std::end(allPatterns),
+                     std::begin(includePatterns),
+                     std::end(includePatterns));
+  allPatterns.insert(std::end(allPatterns),
+                     std::begin(excludePatterns),
+                     std::end(excludePatterns));
 
   // check if any pattern (include OR exclude) needs recursive search
   config.needsRecursiveSearch = std::any_of(
-      allPatterns.begin(), allPatterns.end(), [](const auto& pattern) {
+      std::begin(allPatterns), std::end(allPatterns), [](const auto& pattern) {
         return pattern.find("**") != std::string::npos;
       });
 
@@ -200,9 +204,19 @@ alchemy::discovery::globToRegex(const std::string& pattern)
       case '*':
         if (i + 1 < pattern.size() && pattern[i + 1] == '*')
         {
-          // handle ** (recursive wildcard)
-          result += ".*";
-          ++i;  // skip the second *
+          // handle ** (recursive wildcard — zero or more directories)
+          // if followed by '/', consume it and make the whole group optional
+          // so that "dir/**/*.h" matches both "dir/foo.h" and "dir/sub/foo.h"
+          if (i + 2 < pattern.size() && pattern[i + 2] == '/')
+          {
+            result += "(.*/)?";
+            i += 2;  // skip the second * and the /
+          }
+          else
+          {
+            result += ".*";
+            ++i;  // skip the second *
+          }
         }
         else
         {
@@ -286,13 +300,17 @@ alchemy::discovery::discoverFiles(
     const std::vector<std::string>& excludePatterns,
     const std::size_t Jobs)
 {
-  auto config = buildDiscoveryConfig(sourcePatterns, excludePatterns);
+  const alchemy::discovery::DiscoveryConfig Config =
+      alchemy::discovery::buildDiscoveryConfig(sourcePatterns, excludePatterns);
 
-  auto candidates = findCandidateFiles(config);
+  std::vector<std::filesystem::path> candidates =
+      alchemy::discovery::findCandidateFiles(Config);
 
   // phase 3: pre-compile patterns once for efficient matching
-  auto compiledIncludePatterns = compilePatterns(sourcePatterns);
-  auto compiledExcludePatterns = compilePatterns(excludePatterns);
+  auto compiledIncludePatterns =
+      alchemy::discovery::compilePatterns(sourcePatterns);
+  auto compiledExcludePatterns =
+      alchemy::discovery::compilePatterns(excludePatterns);
 
   // filter candidates in single pass using pre-compiled patterns
   std::vector<std::filesystem::path> sourceFiles;
@@ -319,12 +337,12 @@ alchemy::discovery::discoverFiles(
       {
         const auto& path = candidates[matchesIdx];
         const bool Included = std::any_of(
-            compiledIncludePatterns.begin(),
-            compiledIncludePatterns.end(),
+            std::begin(compiledIncludePatterns),
+            std::end(compiledIncludePatterns),
             [&](const auto& pattern) { return matchesPattern(path, pattern); });
         const bool Excluded = std::any_of(
-            compiledExcludePatterns.begin(),
-            compiledExcludePatterns.end(),
+            std::begin(compiledExcludePatterns),
+            std::end(compiledExcludePatterns),
             [&](const auto& pattern) { return matchesPattern(path, pattern); });
 
         if (Included && !Excluded)
@@ -350,21 +368,27 @@ alchemy::discovery::discoverFiles(
     std::ranges::move(excludes, std::back_inserter(excludedFiles));
   }
 
+  std::ranges::sort(sourceFiles);
+
   // log results
   fmt::print(stdout,
-             "alchemy::{}discovery{}::found {} source files...\n",
-             alchemy::color::ansi::BrightGreen,
+             "alchemy::{}discovery{}::found {}{}{} source files...\n",
+             alchemy::color::ansi::BoldBrightGreen,
              alchemy::color::ansi::Reset,
-             sourceFiles.size());
+             alchemy::color::ansi::BrightGreen,
+             sourceFiles.size(),
+             alchemy::color::ansi::Reset);
   std::ranges::for_each(sourceFiles, [](const auto& file) {
     fmt::print(stdout,
-               "alchemy::{}discovery{}::source file {}{}{}\n",
-               alchemy::color::ansi::BrightGreen,
+               "alchemy::{}discovery{}::source file: {}{}{}\n",
+               alchemy::color::ansi::BoldBrightGreen,
                alchemy::color::ansi::Reset,
-               file.string(),
                alchemy::color::ansi::BrightGreen,
+               file.string(),
                alchemy::color::ansi::Reset);
   });
+  // TODO(ENGPROD-747): handle error code return
+  static_cast<void>(std::fflush(stdout));
 
   // return result
   DiscoveryResult result{std::move(sourceFiles), std::move(excludedFiles)};

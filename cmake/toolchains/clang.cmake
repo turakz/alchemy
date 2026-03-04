@@ -51,9 +51,11 @@ if(NOT DEFINED LLVM_DIR)
         execute_process(
             COMMAND "${_LLVM_CONFIG}" --cmakedir
             OUTPUT_VARIABLE _llvm_cmake_dir
+            RESULT_VARIABLE _llvm_config_result
             OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
         )
-        if(EXISTS "${_llvm_cmake_dir}")
+        if(_llvm_config_result EQUAL 0 AND EXISTS "${_llvm_cmake_dir}")
             set(LLVM_DIR "${_llvm_cmake_dir}" CACHE PATH "LLVM_DIR from llvm-config")
             message(STATUS "alchemy::found LLVM via llvm-config: ${LLVM_DIR}")
             # Clang_DIR is a sibling of LLVM_DIR under lib/cmake/
@@ -135,12 +137,10 @@ if(_LLVM_CONFIG)
         message(STATUS "alchemy::llvm-config suggests libc++")
     endif()
 
-    # Append LLVM compile flags
-    if(_llvm_cxxflags)
-        string(REPLACE "\"" "" _llvm_cxxflags_clean "${_llvm_cxxflags}")
-        separate_arguments(_llvm_cxxflags_list UNIX_COMMAND "${_llvm_cxxflags_clean}")
-        add_compile_options(${_llvm_cxxflags_list})
-    endif()
+    # NOTE: we intentionally do NOT forward llvm-config --cxxflags globally.
+    # Those flags include LLVM's own build settings (-fno-rtti, -std=c++17, etc.)
+    # which conflict with alchemy's settings. LLVM definitions are applied
+    # per-target via target_compile_definitions() in the root CMakeLists.txt.
 endif()
 
 # --------------------------------------------------------------------------

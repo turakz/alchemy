@@ -1,17 +1,14 @@
-// tests/unit/test_struct_parsing_rule.cpp
+// tests/unit/test_clang_struct_parsing_rule.cpp
 
 // std
-
-// 3rd party
 #include <cstddef>
 
 #include <memory>
 #include <string>
 
+// 3rd party
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 #include <gtest/gtest.h>
-
-#include <gmock/gmock.h>
 
 // local
 #include "parsing/libclang/clang_parsing_rules.hpp"
@@ -39,16 +36,9 @@ protected:
 TEST_F(ClangStructParsingRuleTest, ImplementsParsingRuleInterface)
 {
   const std::string Name = structParser->getName();
-  auto extensions = structParser->getSupportedExtensions();
 
   ASSERT_EQ(Name, "ClangStructParser")
       << "alchemy::testing::unit::parser name should match expected value";
-  ASSERT_EQ(extensions.size(), 2)
-      << "alchemy::testing::unit::should support exactly 2 file extensions";
-  ASSERT_THAT(extensions, ::testing::Contains(".c"))
-      << "alchemy::testing::unit::should support .c files";
-  ASSERT_THAT(extensions, ::testing::Contains(".h"))
-      << "alchemy::testing::unit::should support .h files";
 }
 
 TEST_F(ClangStructParsingRuleTest, InheritsFromClangParsingMatcher)

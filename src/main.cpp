@@ -1,3 +1,5 @@
+// src/main.cpp
+
 // std
 #include <cstdint>
 #include <cstdlib>
@@ -6,12 +8,12 @@
 #include <utility>
 
 // 3rd party
-#include "app/core/core.hpp"
-#include "fmt/core.h"
+#include <fmt/core.h>
 
 // local
 #include "app/app.hpp"
 #include "app/color.hpp"
+#include "app/core/core.hpp"
 #include "cli/cli.hpp"
 
 std::int32_t
@@ -20,18 +22,18 @@ main(std::int32_t argc, const char** argv)
   try
   {
     // parse CLI first
-    alchemy::core::Result<alchemy::cli::ParsedOptions> parseResult =
+    alchemy::core::Result<alchemy::cli::ParsedOptions> cliArgs =
         alchemy::cli::parseCli(argc, argv);
 
-    if (parseResult.invalid())
+    if (cliArgs.invalid())
     {
-      fmt::print(stderr, "{}\n", std::move(parseResult).error());
+      fmt::print(stderr, "{}\n", std::move(cliArgs).error());
       return EXIT_FAILURE;
     }
 
     // create app with parsed options
     alchemy::core::Result<alchemy::App> appResult =
-        alchemy::App::create(std::move(parseResult).value());
+        alchemy::App::create(std::move(cliArgs).value());
 
     if (appResult.invalid())
     {
@@ -45,12 +47,11 @@ main(std::int32_t argc, const char** argv)
 
     if (Status == EXIT_SUCCESS)
     {
-      fmt::print(
-          "{}alchemy{}::executed {}successfully{}: yer a wizard, 'arry!\n",
-          alchemy::color::ansi::BrightGreen,
-          alchemy::color::ansi::Reset,
-          alchemy::color::ansi::BrightGreen,
-          alchemy::color::ansi::Reset);
+      fmt::print("alchemy::{}executed successfully{}: yer a wizard, 'arry!",
+                 alchemy::color::ansi::BoldBrightGreen,
+                 alchemy::color::ansi::Reset,
+                 alchemy::color::ansi::BoldBrightGreen,
+                 alchemy::color::ansi::Reset);
     }
     // error messages already printed by App::exec()
 
@@ -60,7 +61,7 @@ main(std::int32_t argc, const char** argv)
   {
     fmt::print(stderr,
                "alchemy::{}fatal{}::exception: {}\n",
-               alchemy::color::ansi::Magenta,
+               alchemy::color::ansi::BoldMagenta,
                alchemy::color::ansi::Reset,
                e.what());
     return EXIT_FAILURE;

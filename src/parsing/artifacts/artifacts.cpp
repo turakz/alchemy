@@ -1,5 +1,7 @@
 // src/parsing/artifacts/artifacts.cpp
 // simulate alignment operation as if computer were allocating memory
+#include "parsing/artifacts/artifacts.hpp"
+
 // std
 #include <cstddef>
 
@@ -9,7 +11,6 @@
 // 3rd party
 
 // local
-#include "parsing/artifacts/artifacts.hpp"
 
 std::size_t
 alchemy::parser::artifacts::StructDef::computeSize(

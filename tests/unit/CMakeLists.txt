@@ -7,6 +7,7 @@ add_executable(unit_tests
   test_clang_struct_extractor.cpp
   test_cli.cpp
   test_compilation_database_adapter.cpp
+  test_config_parser.cpp
   test_core_types.cpp
   test_discovery.cpp
   test_operation.cpp
@@ -29,12 +30,13 @@ target_link_libraries(unit_tests PRIVATE
   gmock_main
 )
 
+# mock compilers must be built before unit tests can run
+add_dependencies(unit_tests mock_iccarm mock_cl)
+
 target_compile_options(unit_tests
   PRIVATE
     ${ALCHEMY_WARNING_FLAGS}
     $<$<CONFIG:Debug>:${ALCHEMY_DEBUG_FLAGS}>
-    $<$<CONFIG:Release>:${ALCHEMY_RELEASE_FLAGS}>
-    -fdiagnostics-color=always
 )
 
 # add coverage instrumentation if enabled
@@ -62,9 +64,6 @@ set_tests_properties(UnitTests PROPERTIES
 
   # label for filtering
   LABELS "unit_tests"
-
-  # ensure proper failure detection on segfaults/crashes
-  WILL_FAIL FALSE
 )
 
 message(STATUS "alchemy::unit tests configured")

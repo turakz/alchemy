@@ -15,14 +15,6 @@
 
 namespace alchemy::cli {
 
-// ============================================================================
-// feature constants - default output directories
-// ============================================================================
-
-// ============================================================================
-// option groups - semantic grouping of related CLI flags
-// ============================================================================
-
 /// path-related options (input/output locations)
 struct PathOptions {
   std::string buildDir;
@@ -40,13 +32,10 @@ struct FeatureFlags {
 struct CliInputs {
   PathOptions paths{};
   FeatureFlags features{};
-  std::size_t jobs{0};
+  std::size_t jobs{1};
   bool enableDryRun{false};
+  bool dumpConfig{false};
 };
-
-// ============================================================================
-// validated CLI options - immutable result after parsing + validation
-// ============================================================================
 
 struct ParsedOptions {
   std::filesystem::path buildDir{};
@@ -56,9 +45,10 @@ struct ParsedOptions {
 
   bool enableSalign{false};
 
-  bool enableDryRun{false};
+  std::size_t jobs{1};  // number of threads (0 = auto-detect)
 
-  std::size_t jobs{0};  // number of threads (0 = auto-detect)
+  bool enableDryRun{false};
+  bool dumpConfig{false};
 
   ~ParsedOptions() = default;
   ParsedOptions() = default;
@@ -71,7 +61,7 @@ struct ParsedOptions {
 };
 
 // ============================================================================
-// validation - centralized validation logic
+// validation: centralized validation logic
 // ============================================================================
 
 /// validates and transforms CLI inputs into final ParsedOptions
@@ -92,11 +82,9 @@ private:
                             const PathOptions& paths);
 };
 
-// ============================================================================
-// parsing functions
-// ============================================================================
+alchemy::cli::CliInputs
+mergeInputs(CliInputs&& cli, CliInputs&& config);
 
-/// parse CLI from argc/argv (main entry point)
 alchemy::core::Result<ParsedOptions>
 parseCli(int argc, const char** argv);
 
