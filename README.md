@@ -165,7 +165,7 @@ alchemy --salign "inc/**/*.h" --dry-run # redirect transmutations to stdout
 alchemy --salign "inc/**/*.hpp" --dry-run
 
 alchemy --salign "inc/**/*.h" --exclude="inc/external/**/*.h" --dry-run # do not transmute excluded files
-alchemy --salign "inc/**/*.h" --exclude="inc/external/**/*.hpp" --dry-run
+alchemy --salign "inc/**/*.hpp" --exclude="inc/external/**/*.hpp" --dry-run
 ```
 
 `--build-dir` / `-b` lets you specify build directories:
