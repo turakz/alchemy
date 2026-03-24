@@ -12,7 +12,7 @@
 namespace alchemy::metrics {
 
 // variant type - unified metrics representation
-using Metrics = std::variant<detail::SAlignMetrics>;
+using Metrics = std::variant<SAlignMetrics>;
 
 }  // namespace alchemy::metrics
 #endif  // ALCHEMY_METRICS_METRICS_HPP

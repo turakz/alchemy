@@ -1,4 +1,4 @@
-// tests/unit/test_struct_extractor.cpp
+// tests/unit/test_clang_struct_extractor.cpp
 
 // std
 #include <iterator>
@@ -114,7 +114,7 @@ TEST_F(StructExtractorTest, ExtractStructSimpleCase)
 
   const auto& structDef = result.value();
   ASSERT_EQ(structDef.structName, "SimpleStruct");
-  ASSERT_EQ(structDef.getFieldCount(), 2);
+  ASSERT_EQ(structDef.fields.size(), 2);
   ASSERT_GT(structDef.naturalTotalSize, 0);
   ASSERT_GT(structDef.currentDataSize, 0);
   ASSERT_GT(structDef.naturalAlignment, 0);
@@ -142,7 +142,7 @@ TEST_F(StructExtractorTest, ExtractStructEmptyStruct)
 
   const auto& structDef = result.value();
   ASSERT_EQ(structDef.structName, "EmptyStruct");
-  ASSERT_EQ(structDef.getFieldCount(), 0);
+  ASSERT_EQ(structDef.fields.size(), 0);
   ASSERT_EQ(structDef.currentDataSize, 0);
 }
 
@@ -173,7 +173,7 @@ TEST_F(StructExtractorTest, ExtractStructDetectsBitfields)
   ASSERT_EQ(structDef.structName, "BitfieldStruct");
   ASSERT_TRUE(structDef.hasBitFields)
       << "alchemy::testing::unit::should detect bitfields";
-  ASSERT_EQ(structDef.getFieldCount(), 3);
+  ASSERT_EQ(structDef.fields.size(), 3);
 }
 
 // Test extractStruct calculates layout correctly
@@ -201,7 +201,7 @@ TEST_F(StructExtractorTest, ExtractStructCalculatesLayoutCorrectly)
 
   const auto& structDef = result.value();
   ASSERT_EQ(structDef.structName, "UnoptimizedStruct");
-  ASSERT_EQ(structDef.getFieldCount(), 3);
+  ASSERT_EQ(structDef.fields.size(), 3);
 
   // This struct should have significant padding
   ASSERT_GT(structDef.naturalTotalSize, structDef.currentDataSize)
@@ -242,7 +242,7 @@ TEST_F(StructExtractorTest, ExtractFieldSimpleCase)
 
   const auto& fieldDef = result.value();
   ASSERT_EQ(fieldDef.fieldName, "field");
-  ASSERT_EQ(fieldDef.typeName, "int");
+  ASSERT_EQ(fieldDef.canonicalTypeName, "int");
   ASSERT_EQ(fieldDef.naturalSize, 4);  // int is 4 bytes
   ASSERT_EQ(fieldDef.naturalAlignment, 4);
   ASSERT_FALSE(fieldDef.isBitField);
@@ -302,7 +302,7 @@ TEST_F(StructExtractorTest, ExtractFieldDeterminesReorderability)
 
   // Test normal field
   auto fields = structDecl->fields();
-  auto it = fields.begin();
+  auto it = std::begin(fields);
   const clang::FieldDecl* normalFieldDecl = *it;
   ++it;
   const clang::FieldDecl* bitfieldDecl = *it;
@@ -380,7 +380,7 @@ TEST_F(StructExtractorTest, ExtractFieldHandlesPointerTypes)
 
   // Extract all pointer fields
   auto fields = structDecl->fields();
-  ASSERT_EQ(std::distance(fields.begin(), fields.end()), 3)
+  ASSERT_EQ(std::distance(std::begin(fields), std::end(fields)), 3)
       << "alchemy::testing::unit::should have 3 pointer fields";
 
   for (const clang::FieldDecl* fieldDecl : fields)
@@ -396,6 +396,35 @@ TEST_F(StructExtractorTest, ExtractFieldHandlesPointerTypes)
 
     validatePointerField(result.value());
   }
+}
+
+// Test extractStruct resolves typedef name for anonymous structs
+TEST_F(StructExtractorTest, ExtractStructTypedefAnonymousStruct)
+{
+  const std::string Code = R"(
+    typedef struct {
+      int x;
+      double y;
+    } MyTypedefStruct;
+  )";
+
+  auto ast = buildAST(Code);
+  ASSERT_NE(ast, nullptr);
+
+  const clang::RecordDecl* structDecl = findFirstStruct(ast.get());
+  ASSERT_NE(structDecl, nullptr);
+
+  auto result = alchemy::parser::StructExtractor::extractStruct(
+      structDecl, ast->getSourceManager(), ast->getLangOpts());
+
+  ASSERT_TRUE(result.valid())
+      << "alchemy::testing::unit::typedef struct extraction should succeed";
+
+  const auto& structDef = result.value();
+  ASSERT_EQ(structDef.structName, "MyTypedefStruct");
+  ASSERT_EQ(structDef.fields.size(), 2);
+  ASSERT_GT(structDef.naturalTotalSize, 0);
+  ASSERT_GT(structDef.currentDataSize, 0);
 }
 
 }  // namespace alchemy::testing

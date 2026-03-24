@@ -5,8 +5,8 @@
 // std
 #include <cstddef>
 
-#include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // local
@@ -29,7 +29,7 @@ struct AlignmentStats {
 };
 
 struct FileStats : AlignmentStats {
-  std::filesystem::path file{};
+  std::string file;
   std::size_t structCount{0};
 };
 
@@ -37,6 +37,19 @@ struct GlobalStats : AlignmentStats {
   std::size_t totalStructs{0};
   std::size_t optimizableStructs{0};
 };
+
+// row data for metrics table rendering
+struct MetricsRow {
+  std::string label;
+  std::string current;
+  std::string optimized;
+  std::string improvement;
+};
+
+// render a table section: column header + rows + bottom separator
+void
+printMetricsTable(std::string_view subtitle,
+                  const std::vector<MetricsRow>& rows);
 
 // helper: format percentage change for display
 std::string
@@ -50,44 +63,42 @@ formatPaddingImprovement(std::size_t currentPadding,
 // helper: aggregate metrics by file
 std::vector<FileStats>
 aggregateByFile(
-    const std::vector<alchemy::metrics::detail::SAlignMetrics>& optimizable);
+    const std::vector<alchemy::metrics::SAlignMetrics>& optimizable);
 
 // helper: report per-file summary
 void
 reportPerFileSummary(
-    const std::vector<alchemy::metrics::detail::SAlignMetrics>& optimizable);
+    const std::vector<alchemy::metrics::SAlignMetrics>& optimizable);
 
 // helper: sort metrics by savings (descending)
-std::vector<alchemy::metrics::detail::SAlignMetrics>
-sortBySavings(
-    const std::vector<alchemy::metrics::detail::SAlignMetrics>& metrics);
+std::vector<alchemy::metrics::SAlignMetrics>
+sortBySavings(const std::vector<alchemy::metrics::SAlignMetrics>& metrics);
 
 // helper: report per-struct summary
 void
 reportPerStructSummary(
-    const std::vector<alchemy::metrics::detail::SAlignMetrics>& optimizable);
+    const std::vector<alchemy::metrics::SAlignMetrics>& optimizable);
 
 // helper: compute global statistics
 GlobalStats
 computeGlobalStats(
-    const std::vector<alchemy::metrics::detail::SAlignMetrics>& optimizable,
+    const std::vector<alchemy::metrics::SAlignMetrics>& optimizable,
     std::size_t totalStructs);
 
 // helper: report global summary
 void
 reportGlobalSummary(
-    const std::vector<alchemy::metrics::detail::SAlignMetrics>& optimizable,
+    const std::vector<alchemy::metrics::SAlignMetrics>& optimizable,
     std::size_t totalStructs);
 
 // helper: extract only optimizable structs from all metrics
-std::vector<alchemy::metrics::detail::SAlignMetrics>
+std::vector<alchemy::metrics::SAlignMetrics>
 extractOptimizable(
-    const std::vector<alchemy::metrics::detail::SAlignMetrics>& allMetrics);
+    const std::vector<alchemy::metrics::SAlignMetrics>& allMetrics);
 
 // helper: accumulate common stats from a range of metrics
 AlignmentStats
-accumulateStats(
-    const std::vector<alchemy::metrics::detail::SAlignMetrics>& metrics);
+accumulateStats(const std::vector<alchemy::metrics::SAlignMetrics>& metrics);
 
 }  // namespace detail
 
@@ -95,7 +106,7 @@ accumulateStats(
 class SAlignReporter {
 public:
   static void
-  report(const std::vector<alchemy::metrics::detail::SAlignMetrics>& metrics);
+  report(const std::vector<alchemy::metrics::SAlignMetrics>& metrics);
 };
 
 }  // namespace alchemy::metrics::reporter

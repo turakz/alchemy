@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include "utils.h"
 #include "header_only.h"
 
@@ -15,6 +14,5 @@ int main(void)
   hos.smallValue = 'a';
   hos.mediumValue = 42;
 
-  printf("shared_project test\n");
   return 0;
 }

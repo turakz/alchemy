@@ -1,5 +1,5 @@
 // tests/performance/test_salign_stress.cpp
-// stress tests for struct alignment - extreme cases to test scalability limits
+// stress tests for struct alignment -> extreme cases to test scalability limits
 
 // std
 #include <cctype>
@@ -30,11 +30,8 @@ protected:
   SetUp() override
   {
     // create temporary test directory
-    tempDir = std::filesystem::temp_directory_path() /
-              "alchemy_salign_stress_test" /
-              std::to_string(
-                  std::chrono::steady_clock::now().time_since_epoch().count());
-    std::filesystem::create_directories(tempDir);
+    tempDir = alchemy::testing::utils::createTempTestDirectory(
+        "alchemy_salign_stress_test");
   }
 
   void
@@ -81,9 +78,11 @@ protected:
 
     // Header guards
     std::string guardName = filename;
-    std::replace(guardName.begin(), guardName.end(), '.', '_');
-    std::transform(
-        guardName.begin(), guardName.end(), guardName.begin(), ::toupper);
+    std::replace(std::begin(guardName), std::end(guardName), '.', '_');
+    std::transform(std::begin(guardName),
+                   std::end(guardName),
+                   std::begin(guardName),
+                   ::toupper);
 
     content << "#ifndef " << guardName << "\n";
     content << "#define " << guardName << "\n\n";
@@ -133,7 +132,8 @@ TEST_F(SalignStressTest, SingleFile_10000Structs)
   auto start = std::chrono::high_resolution_clock::now();
 
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {std::move(std::filesystem::path(
                                tempDir.string() + "/*.h"))},
@@ -175,7 +175,8 @@ TEST_F(SalignStressTest, ManyFiles_200Files_100StructsEach)
   auto start = std::chrono::high_resolution_clock::now();
 
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {std::move(std::filesystem::path(
                                tempDir.string() + "/*.h"))},
@@ -218,7 +219,8 @@ TEST_F(SalignStressTest, ExtremeCase_500Files_100StructsEach)
   auto start = std::chrono::high_resolution_clock::now();
 
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {std::move(std::filesystem::path(
                                tempDir.string() + "/*.h"))},

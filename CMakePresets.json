@@ -1,0 +1,186 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "toolchainFile": "cmake/toolchains/clang.cmake",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "inherits": "base",
+      "displayName": "Debug",
+      "binaryDir": "${sourceDir}/build/debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_COVERAGE": "OFF"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "displayName": "Release",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ENABLE_COVERAGE": "OFF"
+      }
+    },
+    {
+      "name": "coverage",
+      "inherits": "base",
+      "displayName": "Debug + Coverage",
+      "binaryDir": "${sourceDir}/build/coverage",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_COVERAGE": "ON"
+      }
+    },
+    {
+      "name": "sanitizers",
+      "inherits": "base",
+      "displayName": "Debug + Sanitizers",
+      "binaryDir": "${sourceDir}/build/sanitizers",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_SANITIZERS": "ON",
+        "ENABLE_COVERAGE": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "debug-alchemy",
+      "configurePreset": "debug",
+      "targets": ["alchemy"]
+    },
+    {
+      "name": "release-alchemy",
+      "configurePreset": "release",
+      "targets": ["alchemy"]
+    },
+    {
+      "name": "debug-unit-tests",
+      "configurePreset": "debug",
+      "targets": ["unit_tests"]
+    },
+    {
+      "name": "debug-integration-tests",
+      "configurePreset": "debug",
+      "targets": ["integration_tests"]
+    },
+    {
+      "name": "release-performance-tests",
+      "configurePreset": "release",
+      "targets": ["performance_tests"]
+    },
+    {
+      "name": "release-performance-stress-tests",
+      "configurePreset": "release",
+      "targets": ["performance_stress_tests"]
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage",
+      "targets": ["unit_tests", "integration_tests"]
+    },
+    {
+      "name": "sanitizers",
+      "configurePreset": "sanitizers"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "unit",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true,
+        "verbosity": "verbose"
+      },
+      "filter": {
+        "include": {
+          "label": "unit_tests"
+        }
+      }
+    },
+    {
+      "name": "integration",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true,
+        "verbosity": "verbose"
+      },
+      "filter": {
+        "include": {
+          "label": "integration_tests"
+        }
+      }
+    },
+    {
+      "name": "all",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "filter": {
+        "include": {
+          "label": "unit_tests|integration_tests"
+        }
+      }
+    },
+    {
+      "name": "parallel",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true,
+        "verbosity": "verbose"
+      },
+      "execution": {
+        "jobs": 0
+      }
+    },
+    {
+      "name": "performance",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true,
+        "verbosity": "verbose"
+      },
+      "filter": {
+        "include": {
+          "label": "performance_tests"
+        }
+      }
+    },
+    {
+      "name": "performance-stress",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true,
+        "verbosity": "verbose"
+      },
+      "filter": {
+        "include": {
+          "label": "performance_stress_tests"
+        }
+      }
+    }
+  ]
+}

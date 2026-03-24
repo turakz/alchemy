@@ -2,6 +2,7 @@
 
 // std
 #include <filesystem>
+#include <regex>
 
 // 3rd party
 #include <gtest/gtest.h>
@@ -18,8 +19,8 @@ protected:
   SetUp() override
   {
     // create temporary test directory structure
-    testDir = std::filesystem::temp_directory_path() / "alchemy_discovery_test";
-    std::filesystem::create_directories(testDir);
+    testDir = alchemy::testing::utils::createTempTestDirectory(
+        "alchemy_discovery_test", false);
 
     srcDir = testDir / "src";
     incDir = testDir / "inc";
@@ -283,6 +284,113 @@ TEST_F(DiscoveryTest, HandlesMultipleWildcardPatterns)
 
   ASSERT_TRUE(foundInSrc) << "alchemy::testing::unit:should find files in src/";
   ASSERT_TRUE(foundInInc) << "alchemy::testing::unit:should find files in inc/";
+}
+
+// test globToRegex directly
+TEST_F(DiscoveryTest, GlobToRegexHandlesDoubleStarSlash)
+{
+  // **/ should match zero or more directory levels
+  auto regex = discovery::globToRegex("dir/**/*.h");
+  // zero levels: "dir/foo.h" should match
+  ASSERT_TRUE(std::regex_match("dir/foo.h", std::regex(regex)))
+      << "**/ should match zero directory levels, regex: " << regex;
+  // one level: "dir/sub/foo.h" should match
+  ASSERT_TRUE(std::regex_match("dir/sub/foo.h", std::regex(regex)))
+      << "**/ should match one directory level, regex: " << regex;
+  // two levels: "dir/a/b/foo.h" should match
+  ASSERT_TRUE(std::regex_match("dir/a/b/foo.h", std::regex(regex)))
+      << "**/ should match multiple directory levels, regex: " << regex;
+  // non-.h should not match
+  ASSERT_FALSE(std::regex_match("dir/foo.cpp", std::regex(regex)))
+      << "**/*.h should not match .cpp files";
+}
+
+// test that recursive glob finds files directly in the target directory
+TEST_F(DiscoveryTest, RecursiveGlobFindsFilesAtZeroDepth)
+{
+  // create files directly in incDir (no subdirectory nesting)
+  // incDir already has core.h and cli.h from SetUp()
+  const std::string RecursivePattern = incDir.string() + "/**/*.h";
+  auto result = discovery::discoverFiles({RecursivePattern}, {});
+
+  ASSERT_TRUE(result.valid());
+
+  const auto& discoveryResult = result.value();
+  ASSERT_GE(discoveryResult.sourceFiles.size(), 2)
+      << "**/*.h should match files directly in the target directory "
+         "(zero directory levels)";
+
+  bool foundCore = false;
+  bool foundCli = false;
+  for (const auto& file : discoveryResult.sourceFiles)
+  {
+    if (file.filename() == "core.h")
+    {
+      foundCore = true;
+    }
+    if (file.filename() == "cli.h")
+    {
+      foundCli = true;
+    }
+  }
+
+  ASSERT_TRUE(foundCore) << "should find core.h at zero depth";
+  ASSERT_TRUE(foundCli) << "should find cli.h at zero depth";
+}
+
+// ============================================================================
+// globToRegex edge cases
+// ============================================================================
+
+TEST_F(DiscoveryTest, GlobToRegex_BareDoubleStar)
+{
+  auto regex = discovery::globToRegex("dir/**");
+  ASSERT_TRUE(std::regex_match("dir/foo", std::regex(regex)))
+      << "bare ** should match a single path component";
+  ASSERT_TRUE(std::regex_match("dir/a/b", std::regex(regex)))
+      << "bare ** should match multiple path components";
+}
+
+TEST_F(DiscoveryTest, GlobToRegex_QuestionMark)
+{
+  auto regex = discovery::globToRegex("file?.h");
+  ASSERT_TRUE(std::regex_match("fileA.h", std::regex(regex)))
+      << "? should match exactly one non-slash character";
+  ASSERT_FALSE(std::regex_match("file.h", std::regex(regex)))
+      << "? should not match zero characters";
+  ASSERT_FALSE(std::regex_match("fileAB.h", std::regex(regex)))
+      << "? should not match two characters";
+}
+
+// ============================================================================
+// findCommonAncestor edge cases
+// ============================================================================
+
+TEST_F(DiscoveryTest, FindCommonAncestor_EmptyPaths)
+{
+  auto result = discovery::detail::findCommonAncestor({});
+  ASSERT_EQ(result, std::filesystem::current_path())
+      << "empty paths should return current_path()";
+}
+
+TEST_F(DiscoveryTest, FindCommonAncestor_DisjointPaths)
+{
+  // relative paths with no common prefix cause ancestor walk to empty out
+  auto result =
+      discovery::detail::findCommonAncestor({"aaa/child", "zzz/other"});
+  ASSERT_EQ(result, std::filesystem::current_path())
+      << "disjoint paths should return current_path()";
+}
+
+// ============================================================================
+// buildDiscoveryConfig edge cases
+// ============================================================================
+
+TEST_F(DiscoveryTest, BuildDiscoveryConfig_ExtensionWithWildcard)
+{
+  auto config = discovery::buildDiscoveryConfig({"src/*.h*"}, {});
+  ASSERT_TRUE(config.targetExtensions.contains(".h"))
+      << "extension with trailing wildcard should be cleaned to .h";
 }
 
 }  // namespace alchemy::testing

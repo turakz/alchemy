@@ -205,15 +205,13 @@ export Clang_DIR=/usr/lib/llvm-14/lib/cmake/clang
 make alchemy.debug
 ```
 
-### Option 2: Direct CMake argument
+### Option 2: Direct CMake argument (via presets)
 
 ```bash
-cmake -S. -Bbuild \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/clang.cmake \
+cmake --preset debug \
   -DLLVM_DIR=/usr/lib/llvm-14/lib/cmake/llvm \
-  -DClang_DIR=/usr/lib/llvm-14/lib/cmake/clang \
-  -DCMAKE_BUILD_TYPE=Debug
-cmake --build build
+  -DClang_DIR=/usr/lib/llvm-14/lib/cmake/clang
+cmake --build build/debug
 ```
 
 ### Option 3: Makefile passthrough

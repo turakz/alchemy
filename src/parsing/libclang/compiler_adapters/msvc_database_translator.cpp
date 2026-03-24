@@ -1,9 +1,9 @@
-// inc/parsing/libclang/compiler_adapters/msvc_database_translator.cpp
+// src/parsing/libclang/compiler_adapters/msvc_database_translator.cpp
+#include "parsing/libclang/compiler_adapters/msvc_database_translator.hpp"
+
 // std
 #include <cstddef>
 
-#include <algorithm>
-#include <iterator>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -12,11 +12,8 @@
 // 3rd party
 #include <clang/Tooling/CompilationDatabase.h>
 
-// local
-#include "parsing/libclang/compiler_adapters/msvc_database_translator.hpp"
-
 clang::tooling::CompileCommand
-alchemy::parser::libclang::adapters::MSVCDbTranslator::translateCommand(
+alchemy::parser::libclang::adapters::MsvcDbTranslator::translateCommand(
     const clang::tooling::CompileCommand& msvcCommand) const
 {
   clang::tooling::CompileCommand clangCommand = msvcCommand;
@@ -27,14 +24,20 @@ alchemy::parser::libclang::adapters::MSVCDbTranslator::translateCommand(
   // msvc compatibility
   translatedArgs.emplace_back("-fms-extensions");
   translatedArgs.emplace_back("-fms-compatibility");
+  // hardcoded to x86_64 Windows because MSVC uses separate cl.exe binaries per
+  // target (x86, x64, ARM, ARM64)
+  // future: detect the target by parsing the cl.exe path (e.g.,
+  // Hostx64/arm64/cl.exe), the banner output ("Microsoft C/C++ Compiler ... for
+  // x64"), or predefined macros (_M_IX86, _M_X64, _M_ARM, _M_ARM64) and map to
+  // the appropriate clang target triple
   translatedArgs.emplace_back("-target");
-  translatedArgs.emplace_back("-x86_64-pc-windows-msvc");
+  translatedArgs.emplace_back("x86_64-pc-windows-msvc");
 
   // translate msvc flags to clang
   for (std::size_t idx = 1; idx < msvcCommand.CommandLine.size(); ++idx)
   {
     const auto& arg = msvcCommand.CommandLine[idx];
-    if (alchemy::parser::libclang::adapters::MSVCDbTranslator::
+    if (alchemy::parser::libclang::adapters::MsvcDbTranslator::
             knownCompilerFlags()
                 .contains(arg))
     {
@@ -118,22 +121,8 @@ alchemy::parser::libclang::adapters::MSVCDbTranslator::translateCommand(
   return clangCommand;
 }
 
-std::vector<clang::tooling::CompileCommand>
-alchemy::parser::libclang::adapters::MSVCDbTranslator::translateAll(
-    const clang::tooling::CompilationDatabase& db) const
-{
-  auto commands = db.getAllCompileCommands();
-  std::vector<clang::tooling::CompileCommand> result;
-  result.reserve(commands.size());
-  std::transform(commands.begin(),
-                 commands.end(),
-                 std::back_inserter(result),
-                 [this](const auto& cmd) { return translateCommand(cmd); });
-  return result;
-}
-
 bool
-alchemy::parser::libclang::adapters::MSVCDbTranslator::isMSVCCompiler(
+alchemy::parser::libclang::adapters::MsvcDbTranslator::isMsvcCompiler(
     const clang::tooling::CompilationDatabase& db)
 {
   auto allCommands = db.getAllCompileCommands();
@@ -142,7 +131,7 @@ alchemy::parser::libclang::adapters::MSVCDbTranslator::isMSVCCompiler(
   {
     for (const auto& arg : cmd.CommandLine)
     {
-      if (alchemy::parser::libclang::adapters::MSVCDbTranslator::
+      if (alchemy::parser::libclang::adapters::MsvcDbTranslator::
               knownCompilerFlags()
                   .contains(arg))
       {
@@ -155,7 +144,7 @@ alchemy::parser::libclang::adapters::MSVCDbTranslator::isMSVCCompiler(
 }
 
 const std::unordered_set<std::string>&
-alchemy::parser::libclang::adapters::MSVCDbTranslator::knownCompilerFlags()
+alchemy::parser::libclang::adapters::MsvcDbTranslator::knownCompilerFlags()
 {
   static const std::unordered_set<std::string> CompilerFlags = {
       // runtime library linking (MSVC-specific)
@@ -200,7 +189,7 @@ alchemy::parser::libclang::adapters::MSVCDbTranslator::knownCompilerFlags()
       "/Yc",
       "/Yu",
       "/Fp",
-      // warnings (MSVC syntax - /W vs -W)
+      // warnings (MSVC syntax: /W vs -W)
       "/W0",
       "/W1",
       "/W2",

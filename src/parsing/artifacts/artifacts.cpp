@@ -1,5 +1,7 @@
 // src/parsing/artifacts/artifacts.cpp
 // simulate alignment operation as if computer were allocating memory
+#include "parsing/artifacts/artifacts.hpp"
+
 // std
 #include <cstddef>
 
@@ -9,7 +11,6 @@
 // 3rd party
 
 // local
-#include "parsing/artifacts/artifacts.hpp"
 
 std::size_t
 alchemy::parser::artifacts::StructDef::computeSize(
@@ -37,6 +38,32 @@ alchemy::parser::artifacts::StructDef::computeSize(
     offset += Padding;
   }
   // struct size
+  return offset;
+}
+
+std::size_t
+alchemy::parser::artifacts::StructDef::computeSize(
+    const std::vector<alchemy::parser::artifacts::FieldDef>& fields,
+    const std::vector<std::size_t>& order,
+    std::size_t alignment)
+{
+  std::size_t offset = 0;
+  for (const auto Idx : order)
+  {
+    const auto& field = fields[Idx];
+    if ((field.naturalAlignment > 0) && (offset % field.naturalAlignment != 0))
+    {
+      const std::size_t Padding =
+          field.naturalAlignment - (offset % field.naturalAlignment);
+      offset += Padding;
+    }
+    offset += field.naturalSize;
+  }
+  if ((alignment > 0) && (offset % alignment != 0))
+  {
+    const std::size_t Padding = alignment - (offset % alignment);
+    offset += Padding;
+  }
   return offset;
 }
 

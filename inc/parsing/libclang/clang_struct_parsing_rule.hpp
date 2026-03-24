@@ -3,6 +3,7 @@
 
 // std
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 // 3rd party
@@ -16,6 +17,10 @@ namespace alchemy::parser {
 
 class ClangStructParsingRule : public ClangParsingMatcher {
 public:
+  explicit ClangStructParsingRule(std::unordered_set<std::string> targetHeaders)
+    : m_targetHeaders(std::move(targetHeaders))
+  {
+  }
   void
   registerMatchers(clang::ast_matchers::MatchFinder& finder) override;
   void
@@ -25,11 +30,6 @@ public:
   {
     return "ClangStructParser";
   };
-  std::vector<std::string>
-  getSupportedExtensions() const override
-  {
-    return {".c", ".h"};
-  }
 
   const std::vector<parser::artifacts::StructDef>&
   getParsedStructs() const
@@ -50,6 +50,7 @@ public:
   }
 
 private:
+  std::unordered_set<std::string> m_targetHeaders;
   std::vector<parser::artifacts::StructDef> m_parsedStructs;
   std::vector<std::string> m_parseErrors;
 };

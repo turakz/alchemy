@@ -1,4 +1,6 @@
 // src/transmute.cpp
+#include "transmute/transmute.hpp"
+
 // std
 #include <cstddef>
 
@@ -8,23 +10,20 @@
 #include <ios>
 #include <numeric>
 #include <string>
+#include <utility>
 #include <vector>
-
-// 3rd party
-#include "fmt/core.h"
 
 // local
 #include "app/color.hpp"
 #include "app/core/core.hpp"
 #include "app/core/utils/utils.hpp"
+#include "logger/logger.hpp"
 #include "operation/operation_base.hpp"
-#include "transmute/transmute.hpp"
 
 alchemy::core::Result<alchemy::transmute::TransmutationResult>
 alchemy::transmute::applyRefactor(
-    const std::filesystem::path& sourceFile,
-    const std::vector<alchemy::operation::detail::RefactorRecipe>& recipes,
-    [[maybe_unused]] const std::filesystem::path& buildDir,
+    const std::string& sourceFile,
+    const std::vector<alchemy::operation::RefactorRecipe>& recipes,
     bool dryRun)
 {
   alchemy::transmute::TransmutationResult result{.file = sourceFile,
@@ -38,7 +37,7 @@ alchemy::transmute::applyRefactor(
         failure(
             alchemy::core::Error::format("alchemy::transmute::applyRefactor",
                                          "failed to open {} for reading",
-                                         sourceFile.string()));
+                                         sourceFile));
   }
 
   // pre-alloc
@@ -53,18 +52,20 @@ alchemy::transmute::applyRefactor(
         failure(
             alchemy::core::Error::format("alchemy::transmute::applyRefactor",
                                          "failed to read entire file: {}",
-                                         sourceFile.string()));
+                                         sourceFile));
   }
 
   const size_t OriginalSize = content.size();
 
   // validate all recipes: check if any recipe is out of bounds
   auto outOfBoundsRecipe = std::find_if(
-      recipes.begin(), recipes.end(), [OriginalSize](const auto& recipe) {
+      std::begin(recipes),
+      std::end(recipes),
+      [OriginalSize](const auto& recipe) {
         return recipe.byteOffset + recipe.byteLength > OriginalSize;
       });
 
-  if (outOfBoundsRecipe != recipes.end())
+  if (outOfBoundsRecipe != std::end(recipes))
   {
     return alchemy::core::Result<alchemy::transmute::TransmutationResult>::
         failure(alchemy::core::Error::format(
@@ -73,14 +74,14 @@ alchemy::transmute::applyRefactor(
             "for {} (size: {})",
             outOfBoundsRecipe->byteOffset,
             outOfBoundsRecipe->byteOffset + outOfBoundsRecipe->byteLength,
-            outOfBoundsRecipe->sourceFile.string(),
+            outOfBoundsRecipe->sourceFile,
             OriginalSize));
   }
 
   // calculate final size
   const size_t FinalSize =
-      std::accumulate(recipes.begin(),
-                      recipes.end(),
+      std::accumulate(std::begin(recipes),
+                      std::end(recipes),
                       OriginalSize,
                       [](size_t acc, const auto& r) {
                         return acc + r.replacementText.size() - r.byteLength;
@@ -103,28 +104,31 @@ alchemy::transmute::applyRefactor(
   // re-direct to stdout
   if (dryRun)
   {
-    fmt::print("alchemy::{}transmute{}::{}dry-run{}::{}\n{}\n",
-               alchemy::color::ansi::BrightGreen,
-               alchemy::color::ansi::Reset,
-               alchemy::color::ansi::Cyan,
-               alchemy::color::ansi::Reset,
-               sourceFile.string(),
-               newContent);
+    alchemy::logger::info("alchemy::{}transmute{}::{}dry-run{}::{}{}{}\n{}\n",
+                          alchemy::color::ansi::BoldBrightGreen,
+                          alchemy::color::ansi::Reset,
+                          alchemy::color::ansi::Cyan,
+                          alchemy::color::ansi::Reset,
+                          alchemy::color::ansi::BrightGreen,
+                          sourceFile,
+                          alchemy::color::ansi::Reset,
+                          newContent);
     return alchemy::core::Result<
         alchemy::transmute::TransmutationResult>::success(std::move(result));
   }
 
   // write once
+  const std::filesystem::path SourcePath(sourceFile);
   const std::filesystem::path TmpSource =
-      sourceFile.parent_path() / (sourceFile.filename().string() + ".alch");
+      SourcePath.parent_path() / (SourcePath.filename().string() + ".alch");
   std::ofstream out(TmpSource, std::ios::binary | std::ios::trunc);
   if (!out)
   {
     return alchemy::core::Result<alchemy::transmute::TransmutationResult>::
         failure(
             alchemy::core::Error::format("alchemy::transmute::applyRefactor",
-                                         "RefactorRecipe"
-                                         " - failed to open temporary file {} "
+                                         "RefactorRecipe:"
+                                         " failed to open temporary file {} "
                                          "for writing",
                                          TmpSource.string()));
   }
@@ -136,8 +140,8 @@ alchemy::transmute::applyRefactor(
     return alchemy::core::Result<alchemy::transmute::TransmutationResult>::
         failure(
             alchemy::core::Error::format("alchemy::transmute::applyRefactor",
-                                         "RefactorRecipe"
-                                         " - failed to write temporary file {}",
+                                         "RefactorRecipe: "
+                                         " failed to write temporary file {}",
                                          TmpSource.string()));
   }
   try
@@ -149,10 +153,10 @@ alchemy::transmute::applyRefactor(
     return alchemy::core::Result<alchemy::transmute::TransmutationResult>::
         failure(
             alchemy::core::Error::format("alchemy::transmute::applyRefactor",
-                                         "RefactorRecipe"
-                                         " - failed to rename {} to {}: {}",
+                                         "RefactorRecipe: "
+                                         " failed to rename {} to {}: {}",
                                          TmpSource.string(),
-                                         sourceFile.string(),
+                                         sourceFile,
                                          err.what()));
   }
   return alchemy::core::Result<
@@ -161,20 +165,19 @@ alchemy::transmute::applyRefactor(
 
 alchemy::core::Result<alchemy::transmute::TransmutationResult>
 alchemy::transmute::applyRecipes(
-    const std::filesystem::path& sourceFile,
+    const std::string& sourceFile,
     const std::vector<alchemy::operation::Recipe>& recipes,
-    const std::filesystem::path& buildDir,
     bool dryRun)
 {
   auto refactorRecipes = alchemy::core::utils::extractVariantFrom<
-      alchemy::operation::detail::RefactorRecipe>(recipes);
+      alchemy::operation::RefactorRecipe>(recipes);
 
   alchemy::transmute::TransmutationResult result{sourceFile, 0};
 
   if (!refactorRecipes.empty())
   {
-    auto refactorResult = alchemy::transmute::applyRefactor(
-        sourceFile, refactorRecipes, buildDir, dryRun);
+    auto refactorResult =
+        alchemy::transmute::applyRefactor(sourceFile, refactorRecipes, dryRun);
     if (refactorResult.invalid())
     {
       return refactorResult;

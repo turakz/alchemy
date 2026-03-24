@@ -6,9 +6,6 @@
 // tests/integration/salign/ for end-to-end validation.
 
 // std
-#include <chrono>
-
-#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -72,12 +69,6 @@ public:
   getName() const override
   {
     return "MockParser";
-  }
-
-  std::vector<std::string_view>
-  getSupportedExtensions() const override
-  {
-    return {".c", ".h", ".cpp", ".hpp"};  // default c/c++ family extensions
   }
 };
 
@@ -177,16 +168,15 @@ public:
 // mock operation that produces recipes
 class MockOperationWithRecipes {
   std::string m_name;
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       m_recipesToReturn;
   alchemy::parser::ParsingRequirements m_requirements;
 
 public:
   explicit MockOperationWithRecipes(
       const std::string& name,
-      std::unordered_map<std::filesystem::path,
-                         std::vector<alchemy::operation::Recipe>> recipes,
+      std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
+          recipes,
       alchemy::parser::ParsingRequirements requirements =
           alchemy::parser::ParsingRequirements{})
     : m_name(name),
@@ -219,28 +209,7 @@ public:
   }
 };
 
-class PipelineTest : public ::testing::Test {
-protected:
-  void
-  SetUp() override
-  {
-    tempDir = std::filesystem::temp_directory_path() / "alchemy_pipeline_test" /
-              std::to_string(
-                  std::chrono::steady_clock::now().time_since_epoch().count());
-    std::filesystem::create_directories(tempDir);
-  }
-
-  void
-  TearDown() override
-  {
-    if (std::filesystem::exists(tempDir))
-    {
-      std::filesystem::remove_all(tempDir);
-    }
-  }
-
-  std::filesystem::path tempDir;
-};
+class PipelineTest : public ::testing::Test {};
 
 // test-specific variant that includes mock operations
 using TestRecipeOperation = std::
@@ -436,7 +405,7 @@ TEST_F(PipelineTest, ExecutePipelineSuccessfulCHeadersFlow)
   // execute full pipeline
   auto result =
       alchemy::pipeline::execute<alchemy::testing::TestRecipeOperation>(
-          parser, operations, tempDir, true);
+          parser, operations, true);
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::c headers pipeline should succeed";
@@ -459,7 +428,7 @@ TEST_F(PipelineTest, ExecutePipelineHandlesParsingFailure)
   // execute pipeline
   auto result =
       alchemy::pipeline::execute<alchemy::testing::TestRecipeOperation>(
-          parser, operations, tempDir, false);
+          parser, operations, false);
 
   ASSERT_TRUE(!result.valid())
       << "alchemy::testing::unit::pipeline result should indicate "
@@ -486,7 +455,7 @@ TEST_F(PipelineTest, ExecutePipelineHandlesCHeadersOperationFailure)
   // execute pipeline
   auto result =
       alchemy::pipeline::execute<alchemy::testing::TestRecipeOperation>(
-          parser, operations, tempDir, false);
+          parser, operations, false);
 
   ASSERT_TRUE(!result.valid())
       << "alchemy::testing::unit::c headers pipeline result should indicate "
@@ -514,7 +483,7 @@ TEST_F(PipelineTest, ExecutePipelineWithMultipleOperations)
   // execute pipeline
   auto result =
       alchemy::pipeline::execute<alchemy::testing::TestRecipeOperation>(
-          parser, operations, tempDir, false);
+          parser, operations, false);
 
   ASSERT_TRUE(!result.valid()) << "alchemy::testing::unit::pipeline should "
                                   "indicate failure even if partial failures";
@@ -534,7 +503,7 @@ TEST_F(PipelineTest, ExecutePipelineWithEmptyOperations)
   // execute pipeline
   auto result =
       alchemy::pipeline::execute<alchemy::testing::TestRecipeOperation>(
-          parser, Operations, tempDir, false);
+          parser, Operations, false);
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::pipeline should handle empty operations";
@@ -552,7 +521,7 @@ TEST_F(PipelineTest, ExecutePipelinePropagatesMetrics)
   MockParser parser(false, "", std::move(mockStructs));
 
   // setup: create mock metrics
-  alchemy::metrics::detail::SAlignMetrics metric;
+  alchemy::metrics::SAlignMetrics metric;
   metric.structName = "TestStruct";
   metric.sourceFile = "test.h";
   metric.naturalTotalSize = 16;
@@ -571,7 +540,7 @@ TEST_F(PipelineTest, ExecutePipelinePropagatesMetrics)
   // execute pipeline
   auto result =
       alchemy::pipeline::execute<alchemy::testing::TestRecipeOperation>(
-          parser, operations, tempDir, true);
+          parser, operations, true);
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::pipeline should succeed";
@@ -580,11 +549,11 @@ TEST_F(PipelineTest, ExecutePipelinePropagatesMetrics)
          "result";
 
   // verify the metric is the one we created
-  ASSERT_TRUE(std::holds_alternative<alchemy::metrics::detail::SAlignMetrics>(
+  ASSERT_TRUE(std::holds_alternative<alchemy::metrics::SAlignMetrics>(
       result.value().allMetrics[0]))
       << "alchemy::testing::unit::metric should be SAlignMetrics variant";
-  auto& returnedMetric = std::get<alchemy::metrics::detail::SAlignMetrics>(
-      result.value().allMetrics[0]);
+  auto& returnedMetric =
+      std::get<alchemy::metrics::SAlignMetrics>(result.value().allMetrics[0]);
   ASSERT_EQ(returnedMetric.structName, "TestStruct");
   ASSERT_EQ(returnedMetric.possibleSavings, 4);
 
@@ -606,13 +575,13 @@ TEST_F(PipelineTest, ExecuteCHeadersPipelineAggregatesMultipleOperationMetrics)
   MockParser parser(false, "", std::move(mockStructs));
 
   // setup: create metrics for first operation
-  alchemy::metrics::detail::SAlignMetrics metric1;
+  alchemy::metrics::SAlignMetrics metric1;
   metric1.structName = "Struct1";
   metric1.sourceFile = "test1.h";
   metric1.possibleSavings = 4;
 
   // setup: create metrics for second operation
-  alchemy::metrics::detail::SAlignMetrics metric2;
+  alchemy::metrics::SAlignMetrics metric2;
   metric2.structName = "Struct2";
   metric2.sourceFile = "test2.h";
   metric2.possibleSavings = 8;
@@ -633,7 +602,7 @@ TEST_F(PipelineTest, ExecuteCHeadersPipelineAggregatesMultipleOperationMetrics)
   // execute pipeline
   auto result =
       alchemy::pipeline::execute<alchemy::testing::TestRecipeOperation>(
-          parser, operations, tempDir, true);
+          parser, operations, true);
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::pipeline should succeed";
@@ -642,10 +611,10 @@ TEST_F(PipelineTest, ExecuteCHeadersPipelineAggregatesMultipleOperationMetrics)
          "aggregated";
 
   // verify both metrics are present
-  auto& m1 = std::get<alchemy::metrics::detail::SAlignMetrics>(
-      result.value().allMetrics[0]);
-  auto& m2 = std::get<alchemy::metrics::detail::SAlignMetrics>(
-      result.value().allMetrics[1]);
+  auto& m1 =
+      std::get<alchemy::metrics::SAlignMetrics>(result.value().allMetrics[0]);
+  auto& m2 =
+      std::get<alchemy::metrics::SAlignMetrics>(result.value().allMetrics[1]);
   ASSERT_EQ(m1.structName, "Struct1");
   ASSERT_EQ(m2.structName, "Struct2");
 }

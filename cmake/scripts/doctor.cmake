@@ -1,8 +1,8 @@
 # cmake/scripts/doctor.cmake
-# Environment diagnostics - checks for required tools and configuration
+# Environment diagnostics -> checks for required tools and configuration
 # Usage: cmake -P cmake/scripts/doctor.cmake
 
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.21)
 
 message(STATUS "")
 message(STATUS "==============================================")
@@ -18,11 +18,18 @@ endif()
 # Track overall health
 set(ALL_OK TRUE)
 
+# LLVM version suffix (passed via -DLLVM_VER=N from Makefile)
+if(DEFINED LLVM_VER)
+  set(_VER_SUFFIX "-${LLVM_VER}")
+else()
+  set(_VER_SUFFIX "")
+endif()
+
 # Check CMake version
 message(STATUS "CMake:")
 message(STATUS "  Version: ${CMAKE_VERSION}")
-if(CMAKE_VERSION VERSION_LESS "3.14")
-  message(STATUS "  Status: ⚠️  version < 3.14 (minimum 3.14 required)")
+if(CMAKE_VERSION VERSION_LESS "3.21")
+  message(STATUS "  Status: ⚠️  version < 3.21 (minimum 3.21 required)")
   set(ALL_OK FALSE)
 else()
   message(STATUS "  Status: ✅ OK")
@@ -30,7 +37,7 @@ endif()
 message(STATUS "")
 
 # Check for Clang compiler
-find_program(CLANG_EXECUTABLE clang++)
+find_program(CLANG_EXECUTABLE NAMES clang++${_VER_SUFFIX} clang++)
 message(STATUS "Clang++ Compiler:")
 if(CLANG_EXECUTABLE)
   execute_process(
@@ -52,28 +59,33 @@ else()
 endif()
 message(STATUS "")
 
-# Check for LLVM via llvm-config
-find_program(LLVM_CONFIG llvm-config)
+# Check for LLVM via llvm-config (not available on Windows)
 message(STATUS "LLVM:")
-if(LLVM_CONFIG)
-  execute_process(
-    COMMAND ${LLVM_CONFIG} --version
-    OUTPUT_VARIABLE LLVM_VERSION_OUTPUT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-  )
-  message(STATUS "  Version: ${LLVM_VERSION_OUTPUT}")
-  message(STATUS "  Path: ${LLVM_CONFIG}")
-  message(STATUS "  Status: ✅ OK")
+if(WIN32)
+  message(STATUS "  Status: ⏭️  Skipped (llvm-config not available on Windows)")
+  message(STATUS "  Note: LLVM is verified via clang++ check above")
 else()
-  message(STATUS "  Status: ⚠️  NOT FOUND on PATH")
-  message(STATUS "  Note: CMake may still find LLVM via LLVM_DIR or CMAKE_PREFIX_PATH")
-  set(ALL_OK FALSE)
+  find_program(LLVM_CONFIG NAMES llvm-config${_VER_SUFFIX} llvm-config)
+  if(LLVM_CONFIG)
+    execute_process(
+      COMMAND ${LLVM_CONFIG} --version
+      OUTPUT_VARIABLE LLVM_VERSION_OUTPUT
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
+    message(STATUS "  Version: ${LLVM_VERSION_OUTPUT}")
+    message(STATUS "  Path: ${LLVM_CONFIG}")
+    message(STATUS "  Status: ✅ OK")
+  else()
+    message(STATUS "  Status: ⚠️  NOT FOUND on PATH")
+    message(STATUS "  Note: CMake may still find LLVM via LLVM_DIR or CMAKE_PREFIX_PATH")
+    set(ALL_OK FALSE)
+  endif()
 endif()
 message(STATUS "")
 
 # Check for clang-format
-find_program(CLANG_FORMAT clang-format)
+find_program(CLANG_FORMAT NAMES clang-format${_VER_SUFFIX} clang-format)
 message(STATUS "clang-format:")
 if(CLANG_FORMAT)
   execute_process(
@@ -90,13 +102,13 @@ if(CLANG_FORMAT)
   message(STATUS "  Status: ✅ OK")
 else()
   message(STATUS "  Status: ⚠️  NOT FOUND on PATH")
-  message(STATUS "  Install: sudo apt install clang-format (Linux) or brew install clang-format (macOS)")
+  message(STATUS "  Install: run 'make setup' or manually install clang-format${_VER_SUFFIX}")
   set(ALL_OK FALSE)
 endif()
 message(STATUS "")
 
 # Check for clang-tidy
-find_program(CLANG_TIDY clang-tidy)
+find_program(CLANG_TIDY NAMES clang-tidy${_VER_SUFFIX} clang-tidy)
 message(STATUS "clang-tidy:")
 if(CLANG_TIDY)
   execute_process(
@@ -113,7 +125,7 @@ if(CLANG_TIDY)
   message(STATUS "  Status: ✅ OK")
 else()
   message(STATUS "  Status: ⚠️  NOT FOUND on PATH")
-  message(STATUS "  Install: sudo apt install clang-tidy (Linux) or brew install llvm (macOS)")
+  message(STATUS "  Install: run 'make setup' or manually install clang-tidy${_VER_SUFFIX}")
   set(ALL_OK FALSE)
 endif()
 message(STATUS "")
@@ -185,8 +197,8 @@ if(ALL_OK)
   message(STATUS "✅ All basic tools found on PATH!")
   message(STATUS "")
   message(STATUS "Next steps:")
-  message(STATUS "  make alchemy        # Build the project")
-  message(STATUS "  make test.all       # Run all tests")
+  message(STATUS "  make alchemy.release      # Build the project")
+  message(STATUS "  make test.all             # Run all tests")
 else()
   message(STATUS "⚠️  Some tools not found on PATH")
   message(STATUS "")
@@ -195,11 +207,7 @@ else()
   message(STATUS "  - CMAKE_PREFIX_PATH")
   message(STATUS "  - System package configs (/usr/lib/cmake, etc.)")
   message(STATUS "")
-  message(STATUS "Recommended installation:")
-  message(STATUS "  Linux: sudo apt install clang llvm-dev libclang-dev clang-format clang-tidy ninja-build")
-  message(STATUS "  macOS: brew install llvm ninja")
-  message(STATUS "")
-  message(STATUS "Try 'make alchemy' - the build may still succeed.")
+  message(STATUS "Recommended: run 'make setup' and then re-run 'make doctor'")
 endif()
 message(STATUS "==============================================")
 message(STATUS "")

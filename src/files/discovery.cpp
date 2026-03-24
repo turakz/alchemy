@@ -1,22 +1,23 @@
 // src/files/discovery.cpp
+#include "files/discovery.hpp"
+
 // std
 #include <cstddef>
+#include <cstdio>
 
 #include <algorithm>
 #include <filesystem>
 #include <iterator>
 #include <regex>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
 
-// 3rd party
-#include "fmt/core.h"
-
 // local
 #include "app/color.hpp"
 #include "app/core/core.hpp"
-#include "files/discovery.hpp"
+#include "logger/logger.hpp"
 
 // helper: find common ancestor directory of multiple paths
 std::filesystem::path
@@ -61,22 +62,28 @@ alchemy::discovery::buildDiscoveryConfig(
   // combine all patterns for extension and recursive analysis
   std::vector<std::string> allPatterns;
   allPatterns.reserve(includePatterns.size() + excludePatterns.size());
-  allPatterns.insert(
-      allPatterns.end(), includePatterns.begin(), includePatterns.end());
-  allPatterns.insert(
-      allPatterns.end(), excludePatterns.begin(), excludePatterns.end());
+  allPatterns.insert(std::end(allPatterns),
+                     std::begin(includePatterns),
+                     std::end(includePatterns));
+  allPatterns.insert(std::end(allPatterns),
+                     std::begin(excludePatterns),
+                     std::end(excludePatterns));
 
   // check if any pattern (include OR exclude) needs recursive search
   config.needsRecursiveSearch = std::any_of(
-      allPatterns.begin(), allPatterns.end(), [](const auto& pattern) {
+      std::begin(allPatterns), std::end(allPatterns), [](const auto& pattern) {
         return pattern.find("**") != std::string::npos;
       });
 
   // extract file extensions from all patterns (both include and exclude)
+  // only consider the filename component (after last '/') to avoid
+  // extracting directory names like ".venv" as extensions
   for (const auto& pattern : allPatterns)
   {
+    auto lastSlash = pattern.find_last_of('/');
+    auto filenameStart = (lastSlash != std::string::npos) ? lastSlash + 1 : 0;
     auto lastDot = pattern.find_last_of('.');
-    if (lastDot != std::string::npos)
+    if (lastDot != std::string::npos && lastDot >= filenameStart)
     {
       std::string extension = pattern.substr(lastDot);
       // clean up extension (remove trailing wildcards if any)
@@ -85,7 +92,8 @@ alchemy::discovery::buildDiscoveryConfig(
       {
         extension = extension.substr(0, wildcard);
       }
-      if (!extension.empty())
+      // reject if contains '/' (directory component, not a file extension)
+      if (!extension.empty() && extension.find('/') == std::string::npos)
       {
         config.targetExtensions.insert(extension);
       }
@@ -125,16 +133,26 @@ alchemy::discovery::buildDiscoveryConfig(
     }
   }
 
+  // if multiple roots were found, enable recursive search
+  if (patternRoots.size() > 1)
+  {
+    config.needsRecursiveSearch = true;
+  }
+
   // find common ancestor of all pattern roots
   if (!patternRoots.empty())
   {
     config.searchRoot = detail::findCommonAncestor(patternRoots);
+  }
 
-    // if multiple roots were found, enable recursive search
-    if (patternRoots.size() > 1)
-    {
-      config.needsRecursiveSearch = true;
-    }
+  {
+    const std::vector<std::string> Extensions(
+        std::begin(config.targetExtensions), std::end(config.targetExtensions));
+    alchemy::logger::debug("alchemy::discovery::buildDiscoveryConfig: "
+                           "searchRoot={}, recursive={}, extensions={}\n",
+                           config.searchRoot.string(),
+                           config.needsRecursiveSearch,
+                           alchemy::logger::formatList(Extensions));
   }
 
   return config;
@@ -176,18 +194,24 @@ alchemy::discovery::findCandidateFiles(const DiscoveryConfig& config)
   }
   catch (const std::filesystem::filesystem_error& e)
   {
-    fmt::print(
+    alchemy::logger::error(
         "{}",
         alchemy::core::Error::format("alchemy::discovery::findCandidateFiles",
                                      "filesystem exception caught: {}",
                                      e.what()));
   }
+
+  alchemy::logger::debug(
+      "alchemy::discovery::findCandidateFiles: found {} candidates in {}\n",
+      candidates.size(),
+      config.searchRoot.string());
+
   return candidates;
 }
 
 // phase 3 helper: convert glob pattern to regex for std::regex matching
 std::string
-alchemy::discovery::globToRegex(const std::string& pattern)
+alchemy::discovery::globToRegex(std::string_view pattern)
 {
   std::string result;
   result.reserve(pattern.size() * 2);
@@ -200,9 +224,19 @@ alchemy::discovery::globToRegex(const std::string& pattern)
       case '*':
         if (i + 1 < pattern.size() && pattern[i + 1] == '*')
         {
-          // handle ** (recursive wildcard)
-          result += ".*";
-          ++i;  // skip the second *
+          // handle ** (recursive wildcard — zero or more directories)
+          // if followed by '/', consume it and make the whole group optional
+          // so that "dir/**/*.h" matches both "dir/foo.h" and "dir/sub/foo.h"
+          if (i + 2 < pattern.size() && pattern[i + 2] == '/')
+          {
+            result += "(.*/)?";
+            i += 2;  // skip the second * and the /
+          }
+          else
+          {
+            result += ".*";
+            ++i;  // skip the second *
+          }
         }
         else
         {
@@ -255,12 +289,12 @@ alchemy::discovery::compilePatterns(const std::vector<std::string>& patterns)
     }
     catch (const std::regex_error& e)
     {
-      fmt::print("{}",
-                 alchemy::core::Error::format(
-                     "alchemy::discovery",
-                     "regex compilation error for pattern '{}': {}",
-                     pattern,
-                     e.what()));
+      alchemy::logger::error("{}",
+                             alchemy::core::Error::format(
+                                 "alchemy::discovery",
+                                 "regex compilation error for pattern '{}': {}",
+                                 pattern,
+                                 e.what()));
       // leave compiledRegex in default state, will fail matching
     }
 
@@ -286,16 +320,27 @@ alchemy::discovery::discoverFiles(
     const std::vector<std::string>& excludePatterns,
     const std::size_t Jobs)
 {
-  auto config = buildDiscoveryConfig(sourcePatterns, excludePatterns);
+  alchemy::logger::debug(
+      "alchemy::discovery::discoverFiles: {} jobs, include={}, exclude={}\n",
+      Jobs,
+      alchemy::logger::formatList(sourcePatterns),
+      alchemy::logger::formatList(excludePatterns));
 
-  auto candidates = findCandidateFiles(config);
+  const alchemy::discovery::DiscoveryConfig Config =
+      alchemy::discovery::buildDiscoveryConfig(sourcePatterns, excludePatterns);
+
+  std::vector<std::filesystem::path> candidates =
+      alchemy::discovery::findCandidateFiles(Config);
 
   // phase 3: pre-compile patterns once for efficient matching
-  auto compiledIncludePatterns = compilePatterns(sourcePatterns);
-  auto compiledExcludePatterns = compilePatterns(excludePatterns);
+  auto compiledIncludePatterns =
+      alchemy::discovery::compilePatterns(sourcePatterns);
+  auto compiledExcludePatterns =
+      alchemy::discovery::compilePatterns(excludePatterns);
 
   // filter candidates in single pass using pre-compiled patterns
   std::vector<std::filesystem::path> sourceFiles;
+  std::vector<std::string> sourceFilesAsStrs;
   std::vector<std::filesystem::path> excludedFiles;
 
   // discovery
@@ -319,12 +364,12 @@ alchemy::discovery::discoverFiles(
       {
         const auto& path = candidates[matchesIdx];
         const bool Included = std::any_of(
-            compiledIncludePatterns.begin(),
-            compiledIncludePatterns.end(),
+            std::begin(compiledIncludePatterns),
+            std::end(compiledIncludePatterns),
             [&](const auto& pattern) { return matchesPattern(path, pattern); });
         const bool Excluded = std::any_of(
-            compiledExcludePatterns.begin(),
-            compiledExcludePatterns.end(),
+            std::begin(compiledExcludePatterns),
+            std::end(compiledExcludePatterns),
             [&](const auto& pattern) { return matchesPattern(path, pattern); });
 
         if (Included && !Excluded)
@@ -350,23 +395,33 @@ alchemy::discovery::discoverFiles(
     std::ranges::move(excludes, std::back_inserter(excludedFiles));
   }
 
-  // log results
-  fmt::print(stdout,
-             "alchemy::{}discovery{}::found {} source files...\n",
-             alchemy::color::ansi::BrightGreen,
-             alchemy::color::ansi::Reset,
-             sourceFiles.size());
-  std::ranges::for_each(sourceFiles, [](const auto& file) {
-    fmt::print(stdout,
-               "alchemy::{}discovery{}::source file {}{}{}\n",
-               alchemy::color::ansi::BrightGreen,
-               alchemy::color::ansi::Reset,
-               file.string(),
-               alchemy::color::ansi::BrightGreen,
-               alchemy::color::ansi::Reset);
-  });
+  std::ranges::sort(sourceFiles);
+  // for debug output
+  sourceFilesAsStrs.reserve(sourceFiles.size());
+  for (const auto& file : sourceFiles)
+  {
+    sourceFilesAsStrs.push_back(file.string());
+  }
 
-  // return result
+  // log results
+  alchemy::logger::debug(
+      "alchemy::discovery::discoverFiles: source files: {}\n",
+      alchemy::logger::formatList(sourceFilesAsStrs));
+  alchemy::logger::info(
+      "alchemy::{}discovery{}::found {}{}{} source files...\n",
+      alchemy::color::ansi::BoldBrightGreen,
+      alchemy::color::ansi::Reset,
+      alchemy::color::ansi::BrightGreen,
+      sourceFiles.size(),
+      alchemy::color::ansi::Reset);
+  alchemy::logger::debug("alchemy::discovery::discoverFiles: {} matched, {} "
+                         "excluded from {} candidates\n",
+                         sourceFiles.size(),
+                         excludedFiles.size(),
+                         candidates.size());
+
+  static_cast<void>(std::fflush(stdout));
+
   DiscoveryResult result{std::move(sourceFiles), std::move(excludedFiles)};
 
   return core::Result<alchemy::discovery::DiscoveryResult>::success(

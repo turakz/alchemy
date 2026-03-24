@@ -6,15 +6,12 @@
 #include <cstddef>
 
 #include <algorithm>
-#include <filesystem>
 #include <iterator>
-#include <numeric>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 // 3rd party
-#include "fmt/core.h"
 
 // local
 #include "app/core/core.hpp"
@@ -67,7 +64,7 @@ runParser(alchemy::parser::ParsingRuleAdapter& parser,
   }
 
   return alchemy::core::Result<alchemy::parser::artifacts::ParseResults>::
-      success(std::move(parseResults.value()));
+      success(std::move(parseResults).value());
 }
 
 // stage 2: execute all operations on parsed artifacts
@@ -80,8 +77,8 @@ executeOperations(const alchemy::parser::artifacts::ParseResults& artifacts,
       results;
   results.reserve(operations.size());
 
-  std::transform(operations.begin(),
-                 operations.end(),
+  std::transform(std::begin(operations),
+                 std::end(operations),
                  std::back_inserter(results),
                  // operations are functors
                  [&artifacts](const RecipeOperationVariantT& operation) {
@@ -106,22 +103,20 @@ struct TransmutationSummary {
 
 alchemy::core::Result<bool>
 validateTransmute(
-    const std::unordered_map<std::filesystem::path,
+    const std::unordered_map<std::string,
                              std::vector<alchemy::operation::Recipe>>&
         allRecipes);
 
 alchemy::core::Result<alchemy::pipeline::TransmutationSummary>
 executeTransmute(const std::unordered_map<
-                     std::filesystem::path,
+                     std::string,
                      std::vector<alchemy::operation::Recipe>>& allRecipes,
-                 const std::filesystem::path& buildDir,
                  bool dryRun);
 
 alchemy::core::Result<alchemy::pipeline::TransmutationSummary>
-transmute(const std::unordered_map<std::filesystem::path,
+transmute(const std::unordered_map<std::string,
                                    std::vector<alchemy::operation::Recipe>>&
               allRecipes,
-          const std::filesystem::path& buildDir,
           bool dryRun);
 
 // full pipeline execution result
@@ -135,7 +130,6 @@ template <typename RecipeOperationVariantT>
 alchemy::core::Result<PipelineResult>
 execute(alchemy::parser::ParsingRuleAdapter& parser,
         const std::vector<RecipeOperationVariantT>& operations,
-        const std::filesystem::path& buildDir,
         bool dryRun)
 {
   alchemy::pipeline::PipelineResult pipelineResult;
@@ -148,13 +142,13 @@ execute(alchemy::parser::ParsingRuleAdapter& parser,
   if (artifacts.invalid())
   {
     return alchemy::core::Result<alchemy::pipeline::PipelineResult>::failure(
-        alchemy::core::Error::format(
-            "alchemy::pipeline", "parsing failed: {}", artifacts.error()));
+        alchemy::core::Error::format("alchemy::pipeline",
+                                     "artifacts not parsed: {}",
+                                     artifacts.error()));
   }
 
   // stage 2: execute recipe operations
   std::vector<alchemy::core::Result<alchemy::operation::RecipeOperationResult>>
-      // TODO(fractals): runRecipeOperations or excuteRecipeOperations
       operationResults =
           alchemy::pipeline::executeOperations<RecipeOperationVariantT>(
               artifacts.value(), operations);
@@ -172,8 +166,8 @@ execute(alchemy::parser::ParsingRuleAdapter& parser,
 
     // transmute recipes
     alchemy::core::Result<alchemy::pipeline::TransmutationSummary>
-        transmutationSummary = alchemy::pipeline::transmute(
-            result.value().recipes, buildDir, dryRun);
+        transmutationSummary =
+            alchemy::pipeline::transmute(result.value().recipes, dryRun);
 
     if (!transmutationSummary.valid())
     {
@@ -184,9 +178,9 @@ execute(alchemy::parser::ParsingRuleAdapter& parser,
     }
 
     // both valid: accumulate metrics and summary
-    pipelineResult.allMetrics.insert(pipelineResult.allMetrics.end(),
-                                     result.value().metrics.begin(),
-                                     result.value().metrics.end());
+    pipelineResult.allMetrics.insert(std::end(pipelineResult.allMetrics),
+                                     std::begin(result.value().metrics),
+                                     std::end(result.value().metrics));
 
     pipelineResult.summary.recipesApplied +=
         transmutationSummary.value().recipesApplied;

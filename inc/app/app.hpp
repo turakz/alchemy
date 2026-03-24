@@ -17,10 +17,6 @@ namespace alchemy {
 
 class App {
 public:
-  // factory method that handles CLI parsing internally
-  [[nodiscard]] static alchemy::core::Result<alchemy::App>
-  createFromCli(int argc, const char** argv);
-  // factory method for convenience
   [[nodiscard]] static alchemy::core::Result<alchemy::App>
   create(alchemy::cli::ParsedOptions options);
 

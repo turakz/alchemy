@@ -1,12 +1,8 @@
-# Alchemy Sequence Diagrams (v1.0.0-alpha)
+# Alchemy Sequence Diagrams (v0.1.0-alpha)
 
-High-level execution flows showing component interactions.
+**Current state (v0.1.0-alpha)**:
 
-**Current state (v1.0.0-alpha)**:
-- Operations are plain classes with duck-typed interface: `getRequirements()`, `getName()`, `execute()`
-- `std::visit` calls methods directly on variant alternatives (compile-time dispatch)
-- IAR translator uses query-driver approach for system include paths
-- Single feature: struct alignment refactoring (`--salign`)
+high-level execution flows showing component interactions
 
 ---
 
@@ -25,26 +21,23 @@ sequenceDiagram
     participant Reporter
 
     %% Phase 1: Setup
-    rect rgb(40, 40, 60)
-        Note over main,Discovery: Phase 1: Initialization
-        main->>App: createFromCli(argc, argv)
-        App->>CLI: parseCli(argc, argv)
-        CLI-->>App: Result<ParsedOptions>
+    Note over main,Discovery: Phase 1: Initialization
+        main->>CLI: parseCli(argc, argv)
+        CLI-->>main: Result<ParsedOptions>
 
+        main->>App: create(ParsedOptions)
         App->>Discovery: discoverFiles(patterns)
         Discovery-->>App: Result<DiscoveryResult>
 
         App-->>main: Result<App>
-    end
 
     %% Phase 2: Execution
-    rect rgb(60, 40, 40)
-        Note over main,Reporter: Phase 2: Pipeline Execution
+    Note over main,Reporter: Phase 2: Pipeline Execution
         main->>App: exec()
 
-        App->>Parser: ClangParser::create(sourceFiles, buildDir)
+        App->>Parser: ClangParser::create(sourceFiles, buildDir, excludePatterns)
         Parser-->>App: Result<unique_ptr<ClangParser>>
-        Note over Parser: buildDir used to load compile_commands.json<br/>CompilationDatabaseFactory detects compiler (IAR/MSVC/GCC)<br/>Returns CompilationDatabaseInfo{database, compilerType}
+        Note over Parser: loadCompilationDatabase → CompilationDatabaseFactory detects compiler<br/>filters compile commands by excludePatterns<br/>buildReverseDependencyMap (clang -MM) → resolveParseCommands<br/>direct-header fallback for unmatched headers
 
         Note over App: Create operations based on config
 
@@ -87,11 +80,9 @@ sequenceDiagram
         end
 
         Pipeline-->>App: Result<PipelineResult{allMetrics, summary}>
-    end
 
     %% Phase 3: Reporting
-    rect rgb(40, 60, 40)
-        Note over App,Reporter: Phase 3: Report Metrics
+    Note over App,Reporter: Phase 3: Report Metrics
 
         alt has metrics
             App->>Reporter: reportMetrics(allMetrics)
@@ -100,26 +91,30 @@ sequenceDiagram
         end
 
         App->>App: Print summary (recipesApplied, filesProcessed)
+
+        alt recipes applied && !dryRun
+            App->>App: Print warning (inline comments may have shifted)
+        end
+
         App-->>main: exitCode
-    end
 ```
 
 **Key Phases**:
-1. **Initialization** (blue) - CLI parsing, file discovery, AppConfig creation
-2. **Pipeline Execution** (red) - Parser creation, pipeline stages (parse → execute → transmute)
-3. **Report Metrics** (green) - App reports metrics (I/O responsibility)
+1. **initialization** -> cli parsing, file discovery, AppConfig creation
+2. **pipeline execution** -> parser creation, pipeline stages (parse → execute → transmute)
+3. **report metrics** -> App reports metrics (I/O responsibility)
 
 **Architecture Properties**:
-- Parser abstraction isolates LLVM from pipeline (language-agnostic interface)
-- Pipeline is stateless data transformation (no I/O)
-- App handles I/O and reporting
-- Semantic layers: `parsing/` extracts data, `operation/` creates recipes, `transmute/` applies recipes
+- parser abstraction isolates LLVM from pipeline (language-agnostic interface)
+- pipeline is stateless data transformation (no I/O)
+- app handles I/O and reporting
+- semantic layers: `parsing/` extracts data, `operation/` creates recipes, `transmute/` applies recipes
 
 ---
 
 ## Parser Creation & Lifecycle
 
-**Focus**: Factory pattern creates parser with compiler translator support
+**focus**: factory translates db, `create()` builds dep graph via `clang -MM`, resolves per-file parse commands
 
 ```mermaid
 sequenceDiagram
@@ -129,71 +124,108 @@ sequenceDiagram
     participant Translator
     participant Adapter
     participant LLVM
+    participant Discovery
 
-    App->>ClangParser: ClangParser::create(sourceFiles, buildDir)
+    App->>ClangParser: ClangParser::create(sourceFiles, buildDir, excludePatterns)
 
-    Note over ClangParser: If buildDir provided, use for compile_commands.json
-
-    rect rgb(60, 40, 60)
-        Note over ClangParser,Adapter: Compiler Detection & Translation
+    Note over ClangParser,Adapter: Step 1: Compiler Detection & Translation
         ClangParser->>CompDBFactory: fromBuildDir(buildDir)
         CompDBFactory->>CompDBFactory: loadFromDirectory(compile_commands.json)
 
         alt IAR detected
-            CompDBFactory->>Translator: IARDbTranslator::translateAll(db)
-            Note over Translator: Query-driver: queries compiler for system includes
+            CompDBFactory->>Translator: IarDbTranslator::translateAll(db)
+            Note over Translator: Query-driver: queries iccarm for system includes
             Translator-->>CompDBFactory: vector<CompileCommand>
-            CompDBFactory->>Adapter: ClangCompilationDatabaseAdapter(translatedCommands)
-            CompDBFactory->>LLVM: inferMissingCompileCommands(adapter)
+            CompDBFactory->>Adapter: ClangCompilationDatabaseAdapter(translated)
             CompDBFactory-->>ClangParser: Result<CompilationDatabaseInfo{db, "IAR"}>
         else MSVC detected
-            CompDBFactory->>Translator: MSVCDbTranslator::translateAll(db)
+            CompDBFactory->>Translator: MsvcDbTranslator::translateAll(db)
             Translator-->>CompDBFactory: vector<CompileCommand>
-            CompDBFactory->>Adapter: ClangCompilationDatabaseAdapter(translatedCommands)
-            CompDBFactory->>LLVM: inferMissingCompileCommands(adapter)
+            CompDBFactory->>Adapter: ClangCompilationDatabaseAdapter(translated)
             CompDBFactory-->>ClangParser: Result<CompilationDatabaseInfo{db, "MSVC"}>
-        else GCC/Clang
+        else GCC detected
+            CompDBFactory->>Translator: GccDbTranslator::translateAll(db)
+            Note over Translator: Query-driver: queries gcc for system includes + target triple
+            Translator-->>CompDBFactory: vector<CompileCommand>
+            CompDBFactory->>Adapter: ClangCompilationDatabaseAdapter(translated)
+            CompDBFactory-->>ClangParser: Result<CompilationDatabaseInfo{db, "GCC"}>
+        else Clang
             CompDBFactory->>Adapter: ClangCompilationDatabaseAdapter(db->getAllCommands())
-            CompDBFactory->>LLVM: inferMissingCompileCommands(adapter)
-            CompDBFactory-->>ClangParser: Result<CompilationDatabaseInfo{db, "GCC/Clang"}>
+            CompDBFactory-->>ClangParser: Result<CompilationDatabaseInfo{db, "Clang"}>
         end
-    end
 
-    ClangParser->>LLVM: create ClangTool(dbInfo.database, sourceFiles)
-    alt Tool creation fails
-        LLVM-->>ClangParser: Error
-        ClangParser-->>App: Result::failure()
-    else Success
-        LLVM-->>ClangParser: unique_ptr<ClangTool>
-    end
+        ClangParser->>ClangParser: allCommands = db->getAllCompileCommands()
 
-    Note over ClangParser: CRITICAL: Store as members
-    ClangParser->>ClangParser: m_tool, m_compilationDb, m_compilerType
+    Note over ClangParser,Discovery: Step 2: Exclude Pattern Filtering
+        alt excludePatterns not empty
+            ClangParser->>Discovery: compilePatterns(excludePatterns)
+            Discovery-->>ClangParser: vector<CompiledPattern>
+            loop for each compile command
+                ClangParser->>Discovery: matchesPattern(cmd.Filename, pattern)
+            end
+            Note over ClangParser: filteredCommands = allCommands − matched
+        else
+            Note over ClangParser: filteredCommands = allCommands
+        end
 
+    Note over ClangParser,LLVM: Step 3: Dep Graph Construction (clang -MM)
+        ClangParser->>ClangParser: findClangBinary()
+        ClangParser->>ClangParser: buildReverseDependencyMap(filteredCommands, clangBinary)
+        loop for each TU in filteredCommands
+            ClangParser->>LLVM: clang -MM <translated-flags> <source.c>
+            LLVM-->>ClangParser: Makefile dep output (target.o: source.c header1.h ...)
+            Note over ClangParser: reverseDepMap[header.h] → [{tuPath, command}]
+        end
+
+    Note over ClangParser: Step 4: Parse Command Resolution
+        ClangParser->>ClangParser: resolveParseCommands(sourceFiles, filteredCommands, reverseDepMap)
+        loop for each sourceFile
+            alt source file (.c/.cpp) found in DB
+                ClangParser->>ClangParser: parseCommands += {absPath, targetName, cmd}
+            else source file not in DB
+                ClangParser->>ClangParser: directHeaders += absPath
+            else header found in reverseDepMap
+                loop for each dep-graph entry (TU that includes this header)
+                    ClangParser->>ClangParser: parseCommands += {tuPath, targetName, cmd}
+                end
+            else header not in reverseDepMap
+                ClangParser->>ClangParser: directHeaders += header
+            end
+        end
+        Note over ClangParser: dedup parseCommands by (parseFile, targetName)
+
+    Note over ClangParser,LLVM: Step 5: Fallback DB (for direct-parse headers only)
+        ClangParser->>LLVM: inferMissingCompileCommands(filteredCommandsAdapter)
+        LLVM-->>ClangParser: fallbackDb
+        ClangParser->>ClangParser: extractIncludePaths(filteredCommands) → globalIncludes
+
+    Note over ClangParser: Construct ClangParser(parseCmds, directHeaders, fallbackDb, globalIncludes, compilerType, targetHeaders)
     ClangParser-->>App: Result<unique_ptr<ClangParser>>
 ```
 
 **Key Points**:
 - `CompilationDatabaseFactory` detects compiler from flags in `compile_commands.json`
-- Uses stateless translators (IAR/MSVC) to convert commands to Clang-compatible format
-- Stores translated commands in `ClangCompilationDatabaseAdapter`
-- Wraps adapter with `inferMissingCompileCommands()` for header file support (applies to all compilers)
-- IAR translator uses query-driver approach (queries actual compiler for system include paths)
-- MSVC translator converts flag syntax (`/I` → `-I`, `/D` → `-D`)
-- Returns `CompilationDatabaseInfo{database, compilerType}`
-- ClangParser stores `ClangTool`, `CompilationDatabase`, and `compilerType` as members
-- Parser exposes compiler type via `getName()` for debugging/testing
+- uses stateless translators (GCC/IAR/MSVC) to convert commands to Clang-compatible format
+- `create()` accepts `excludePatterns` — compile commands matching any pattern are stripped before dep graph work, preventing cross-target SDK include contamination
+- dep graph built via `clang -MM` per filtered TU (produces `reverseDepMap: header → [{tuPath, command}]`)
+- `resolveParseCommands()` maps each user-provided file to the TU(s) that include it, unmatched files go to `directHeaders` for direct-parse fallback
+- `inferMissingCompileCommands` wraps `filteredCommands` only —> excluded TUs cannot contaminate the fallback DB
+- `m_targetHeaders` stores user-requested absolute paths, `ClangStructParsingRule` uses it to filter AST results to only the requested files
+
+**ParseCommand vs Direct Header**:
+- **ParseCommand** (`m_parseCmds`): file is parsed via the TU that includes it (full include chain context) -> one command per `(TU, build target)` pair
+- **direct header** (`m_directHeaders`): no TU in dep graph includes this file, parsed directly via `fallbackDb` with injected include paths and std-type preamble
 
 ---
 
-## IAR Translator - Query-Driver Flow
+## IAR Translator: Compiler Query Driven
 
-**Focus**: IAR translator queries actual compiler for system includes, derives architecture defines
+**focus**: IAR translator queries actual compiler for system includes, derives architecture defines
 
 ```mermaid
 sequenceDiagram
     participant Factory as CompilationDatabaseFactory
-    participant Translator as IARDbTranslator
+    participant Translator as IarDbTranslator
     participant JSONDb as JSONCompilationDatabase
     participant Compiler as iccarm (IAR Compiler)
 
@@ -205,7 +237,7 @@ sequenceDiagram
     JSONDb-->>Translator: vector<CompileCommand>
     Translator->>Translator: Extract compiler path (first cmd.CommandLine[0])
     Translator->>Translator: Extract arch flags (--cpu=Cortex-M4, --fpu=...)
-    Translator-->>Translator: IARQueryConfig{compilerPath, archFlags}
+    Translator-->>Translator: IarQueryConfig{compilerPath, archFlags}
 
     Note over Translator: Step 2: Query compiler for system includes
     Translator->>Translator: querySystemIncludes(query)
@@ -253,20 +285,102 @@ sequenceDiagram
 ```
 
 **Key Points**:
-- **Query-driver**: Executes actual IAR compiler to get system include paths (no hardcoded assumptions)
-- **Subprocess execution**: Uses `popen()` to run `iccarm -E -xc -v /dev/null`, captures verbose output
-- **Include path parsing**: Parses compiler output for `#include <...>` search paths
-- **Architecture detection**: Exact string matching on `--cpu` flag (M33 must not match M3)
-  - Supports: M0/M0+/M1 (ARMv6-M), M3 (ARMv7-M), M4/M4F/M7/M7F (ARMv7E-M), M23/M33/M33F (ARMv8-M)
-- **Compatibility defines**: `__intrinsic=`, `__packed=__attribute__((packed))`, etc.
+- **compiler query**: executes actual IAR compiler to get system include paths (no hardcoded assumptions)
+- **include path parsing**: parses compiler output for `#include <...>` search paths
+- **architecture detection**: exact string matching on `--cpu` flag (M33 must not match M3)
+  - supports: M0/M0+/M1 (ARMv6-M), M3 (ARMv7-M), M4/M4F/M7/M7F (ARMv7E-M), M23/M33/M33F (ARMv8-M)
+- **compatibility defines**: `__intrinsic=`, `__packed=__attribute__((packed))`, etc.
 - IAR uses GCC-compatible syntax for `-I`, `-D`, `-U` (no translation needed)
-- Returns `vector<CompileCommand>` with **real** include paths from actual compiler
+- returns `vector<CompileCommand>` with **real** include paths from actual compiler
 
 ---
 
-## Pipeline - Parse → Execute → Transmute (Template-Based)
+## GCC Translator
 
-**Focus**: Template-based stateless pipeline stages with requirement-driven parsing
+**focus**: GCC translator queries compiler for system includes and target triple, filters GCC-specific flags, injects ABI-compatibility flags
+
+```mermaid
+sequenceDiagram
+    participant Factory as CompilationDatabaseFactory
+    participant Translator as GccDbTranslator
+    participant JSONDb as JSONCompilationDatabase
+    participant Compiler as gcc (GCC Compiler)
+
+    Factory->>Translator: extractQueryConfig(db)
+    Note over Translator: Step 1: Extract query config
+    Translator->>JSONDb: getAllCompileCommands()
+    JSONDb-->>Translator: vector<CompileCommand>
+    Translator->>Translator: Extract compiler path (CommandLine[0])
+    Translator->>Translator: Infer language from binary name (c / c++)
+    Translator-->>Factory: Result<GccQueryConfig{compilerPath, language}>
+
+    Note over Translator: Step 2: Query system includes
+    Factory->>Translator: querySystemIncludes(query)
+    Translator->>Compiler: popen("gcc -E -Wp,-v -x c /dev/null 2>&1")
+    Compiler-->>Translator: stdout/stderr with include paths
+    Translator->>Translator: parseSystemIncludes(output)
+    Note over Translator: Parse: #include <...> search starts here:<br/>/usr/arm-none-eabi/include<br/>/usr/lib/gcc/arm-none-eabi/12/include<br/>End of search list.
+    Translator-->>Factory: Result<vector<string>> sysIncludes
+
+    Note over Translator: Step 3: Query target triple
+    Factory->>Translator: queryTargetTriple(query)
+    Translator->>Compiler: popen("gcc -dumpmachine")
+    Compiler-->>Translator: "arm-none-eabi"
+    Translator->>Translator: validateTargetTriple(triple)
+    Note over Translator: Extract arch (before first '-')<br/>Check against KnownArchitectures set<br/>Warn if unrecognized (non-fatal)
+    Translator-->>Factory: Result<string> targetTriple
+
+    Factory->>Factory: GccDbTranslator(sysIncludes, targetTriple)
+
+    Note over Translator: Step 4: Translate commands
+    loop for each GCC command
+        Factory->>Translator: translateCommand(gccCmd)
+
+        Note over Translator: Build Clang command
+        Translator->>Translator: Start with "clang"
+        Translator->>Translator: Add -target <triple>
+
+        alt ARM EABI target (arm/thumb-*-none-eabi*)
+            Translator->>Translator: Add -fshort-enums (ABI compat)
+        end
+
+        loop for each queried include path
+            Translator->>Translator: Add -isystem <path>
+        end
+
+        loop for each flag in GCC command
+            alt --driver-mode= flag
+                Note over Translator: Strip (alchemy handles translation)
+            else GCC-only flag OR resource dir suppressor
+                Note over Translator: Strip (-nostdinc, -Werror, --specs=, etc.)
+            else GCC warning with clang equivalent
+                Translator->>Translator: Translate (-Wmaybe-uninitialized -> -Wconditional-uninitialized)
+            else Standard flag (-I, -D, -O, -march, source file)
+                Translator->>Translator: Keep flag unchanged
+            end
+        end
+
+        Translator->>Translator: Add -Wno-unknown-warning-option (safety net)
+        Translator->>Translator: Add -fsyntax-only
+
+        Translator-->>Factory: CompileCommand (Clang-compatible)
+    end
+```
+
+**Key Points**:
+- **compiler query**: Executes actual GCC compiler for system includes (`-E -Wp,-v`) and target triple (`-dumpmachine`)
+- **non-fatal failures**: System include and target triple queries warn on failure but don't block translation
+- **architecture validation**: Checks extracted arch against known set (arm, thumb, aarch64, x86_64, riscv32/64, avr, msp430), warns if unrecognized
+- **ARM EABI `-fshort-enums`**: GCC implicitly enables packed enums for `arm-*-none-eabi*` / `thumb-*-none-eabi*` targets -> clang doesn't, so it's injected explicitly for `sizeof()` correctness
+- **resource dir suppressors**: `-nostdinc`, `-nostdinc++`, `-nobuiltininc`, `-nostdlibinc` are stripped to prevent suppressing clang's resource directory (needed for target-correct `stdint.h`)
+- **flag translation**: 6 GCC warning flags have clang equivalents (e.g., `-Wmaybe-uninitialized` → `-Wconditional-uninitialized`)
+- **blocklist approach**: GCC-specific flags filtered by exact match set + prefix matching (`-fdump-*`, `-fipa-*`, `-Werror=*`)
+
+---
+
+## Pipeline: Parse → Execute → Transmute
+
+**focus**: Template-based stateless pipeline stages with requirement-driven parsing
 
 ```mermaid
 sequenceDiagram
@@ -300,8 +414,8 @@ sequenceDiagram
     loop for each operation result
         alt has recipes
             Pipeline->>Pipeline: transmute(recipes)
-            Note over Pipeline: validateTransmute() - pre-flight checks
-            Note over Pipeline: executeTransmute() - apply recipes
+            Note over Pipeline: validateTransmute() -> pre-flight checks
+            Note over Pipeline: executeTransmute() -> apply recipes
         end
     end
     Note over Pipeline: Accumulate summary
@@ -310,18 +424,18 @@ sequenceDiagram
 ```
 
 **Key Points**:
-- **Template-based**: `execute<RecipeOperationVariantT>()` - generic over operation variant type
-- Production: `execute<RecipeOperation>(...)` - uses real operations
-- Testing: `execute<TestRecipeOperation>(...)` - uses mock operations
-- Single parse pass fulfills all operation requirements
+- **template-based**: `execute<RecipeOperationVariantT>()` -> generic over operation variant type
+- production: `execute<RecipeOperation>(...)` -> uses real operations
+- testing: `execute<TestRecipeOperation>(...)` -> uses mock operations
+- single parse pass fulfills all operation requirements
 - `parser::artifacts::ParseResults` passed by const reference to operations
-- Duck-typed interface: `std::visit` calls `getRequirements()`, `execute()` directly
+- duck-typed interface: `std::visit` calls `getRequirements()`, `execute()` directly
 
 ---
 
-## ClangParser - Error Accumulation
+## ClangParser - parse() Execution & Error Handling
 
-**Focus**: Accumulate errors during AST callbacks (void return type)
+**focus**: per-command ClangTool runs with soft-skip on failure (hard-fail only when nothing was analyzed)
 
 ```mermaid
 sequenceDiagram
@@ -331,37 +445,63 @@ sequenceDiagram
     participant ParsingRule
 
     Pipeline->>ClangParser: parse(requirements)
-    ClangParser->>ClangTool: run(FrontendActionFactory)
 
-    Note over ClangTool,ParsingRule: Clang callbacks (void return)
-    loop for each struct in AST
-        ClangTool->>ParsingRule: run(MatchResult)
-        alt Extraction succeeds
-            ParsingRule->>ParsingRule: m_parsedStructs.push_back()
-        else Extraction fails
-            ParsingRule->>ParsingRule: m_parseErrors.push_back()
+    Note over ClangParser,ClangTool: Command loop — one ClangTool per ParseCommand (soft-skip on error)
+    loop for each ParseCommand in m_parseCmds
+        ClangParser->>ClangParser: run(cmd)
+        Note over ClangParser: thin single-command DB for this TU
+        ClangParser->>ClangTool: run(FrontendActionFactory)
+        loop for each struct in AST
+            ClangTool->>ParsingRule: run(MatchResult)
+            alt struct file in m_targetHeaders
+                ParsingRule->>ParsingRule: m_parsedStructs.push_back()
+            else not in target headers
+                Note over ParsingRule: filtered (TU pulls in many headers)
+            end
+        end
+        ClangTool-->>ClangParser: clangResult (int)
+        alt clangResult != 0 OR hasParseErrors()
+            Note over ClangParser: SOFT-SKIP: log warning, continue to next spec
+        else
+            ClangParser->>ClangParser: results.structs += structs
         end
     end
 
-    ClangTool-->>ClangParser: void
+    Note over ClangParser,ClangTool: Direct-header fallback — soft-skip on error
+    loop for each header in m_directHeaders
+        ClangParser->>ClangParser: run(header)
+        Note over ClangParser: fallbackDb + injectIncludePaths + injectStdPreamble
+        ClangParser->>ClangTool: run(FrontendActionFactory)
+        ClangTool-->>ClangParser: clangResult
+        alt clangResult != 0
+            Note over ClangParser: SOFT-SKIP: log warning, continue
+        else
+            ClangParser->>ClangParser: results.structs += structs
+        end
+    end
 
-    alt Errors accumulated
-        ClangParser-->>Pipeline: Result::failure(joined errors)
-    else No errors
+    alt ALL parse commands failed AND m_directHeaders empty
+        ClangParser-->>Pipeline: Result::failure("all parse commands failed")
+    else
+        ClangParser->>ClangParser: deduplicateStructs(results.structs)
         ClangParser-->>Pipeline: Result::success(ParseResults)
     end
 ```
 
 **Key Points**:
-- Clang callbacks have void return (cannot return errors)
-- Errors stored in `m_parseErrors` vector during callbacks
-- Checked after AST processing, converted to Result::failure()
+- each `ParseCommand` gets its own `ClangTool` with a thin single-command DB (exactly the translated command for that TU)
+- Clang AST callbacks have void return — errors are accumulated in `m_parseErrors` during traversal, checked after `ClangTool::run()` returns
+- `m_targetHeaders` filters AST output to only the user-requested files -> TU-included-only headers are discarded
+- **soft-skip**: a failing parse command (non-zero exit OR parse errors) emits a warning and continues — caused by cross-target SDK include contamination in the compile command
+- **direct-header fallback** (`run(header)`): no TU in dep graph -> uses `fallbackDb` (inferred) + global include injection + std-type preamble injection
+- **hard-fail** only in the degenerate case where every parse command failed AND there are no direct headers — nothing was analyzed at all
+- `deduplicateStructs` removes duplicate `(sourceFile, structName)` pairs emitted when multiple parse commands parse the same shared header
 
 ---
 
 ## Recipe Generation
 
-**Focus**: Operations analyze artifacts, produce recipes wrapped in variants
+**focus**: Operations analyze artifacts, produce recipes wrapped in variants
 
 ```mermaid
 sequenceDiagram
@@ -377,8 +517,14 @@ sequenceDiagram
         Operation->>Analyzer: analyze(structDef)
 
         alt Optimization possible
-            Analyzer-->>Operation: RefactorRecipe{file, offset, length, text}
-            Note over Operation: Auto-wrapped in Recipe variant
+            Note over Analyzer: Sort fields by alignment (desc)
+            Note over Analyzer: Compare original vs optimized order
+            alt Swap involves non-reorderable field
+                Analyzer-->>Operation: empty (bail out — bitfield/anonymous union)
+            else All swapped fields reorderable
+                Analyzer-->>Operation: RefactorRecipe{file, offset, length, text}
+                Note over Operation: text = sourceTypeName + fieldName + arraySuffix + trailingComment
+            end
         else Already optimal
             Analyzer-->>Operation: empty
         end
@@ -391,16 +537,16 @@ sequenceDiagram
 ```
 
 **Key Points**:
-- Pipeline uses `std::visit` to invoke `execute()` on the variant operation type
-- Recipes auto-wrapped in `std::variant<RefactorRecipe>`
-- Metrics auto-wrapped in `std::variant<SAlignMetrics>`
-- Grouped by file for batch processing
+- pipeline uses `std::visit` to invoke `execute()` on the variant operation type
+- recipes auto-wrapped in `std::variant<RefactorRecipe>`
+- metrics auto-wrapped in `std::variant<SAlignMetrics>`
+- grouped by file for batch processing
 
 ---
 
 ## Transmute - Variant Dispatcher
 
-**Focus**: Separate recipes by type, apply with type-specific logic
+**focus**: separate recipes by type, apply with type-specific logic
 
 ```mermaid
 sequenceDiagram
@@ -422,16 +568,16 @@ sequenceDiagram
 ```
 
 **Key Points**:
-- Pre-flight validation prevents partial modifications on error
+- pre-flight validation prevents partial modifications on error
 - `std::visit` dispatches Recipe variant to type-specific handler
-- RefactorRecipes: validate byte ranges, calculate final size, single-pass construction, atomic write (temp + rename)
-- Single-pass construction (17% reduction vs string::replace)
+- refactorRecipes: validate byte ranges, calculate final size, single-pass construction, atomic write (temp + rename)
+- single-pass construction (17% reduction vs string::replace)
 
 ---
 
 ## Metrics Reporter - Variant Dispatcher
 
-**Focus**: Separate metrics by type, dispatch to type-specific reporters
+**focus**: separate metrics by type, dispatch to type-specific reporters
 
 ```mermaid
 sequenceDiagram
@@ -455,15 +601,15 @@ sequenceDiagram
 
 **Key Points**:
 - `std::visit` separates Metrics variant into concrete types
-- Each metric type dispatched to appropriate reporter
-- Reporting in App layer (I/O responsibility), not Pipeline
-- App also reports transmutation summary from PipelineResult
+- each metric type dispatched to appropriate reporter
+- reporting in App layer (I/O responsibility), not Pipeline
+- app also reports transmutation summary from PipelineResult
 
 ---
 
 ## Error Propagation
 
-**Example**: Error during parsing propagates to main with context
+**example**: error during parsing propagates to main with context
 
 ```mermaid
 sequenceDiagram
@@ -489,20 +635,9 @@ sequenceDiagram
 ```
 
 **Key Points**:
-- Result<T> propagates errors up call stack
-- Each layer adds contextual prefix
-- User sees full error chain
-- Error strings moved with `std::move(result).error()` (no copies)
-
----
-
-## Performance Notes
-
-- Pre-compiled glob patterns (once per pattern, not per file)
-- Single parse pass with requirement aggregation
-- Byte-offset precision (no line parsing overhead)
-- Single-pass transmutation with pre-allocation
-- Move semantics for `Result<T>` (eliminates error string copies)
-- Primary bottleneck: ClangTool initialization and AST traversal
+- result<T> propagates errors up call stack
+- each layer adds contextual prefix
+- user sees full error chain
+- error strings moved with `std::move(result).error()` (no copies)
 
 ---

@@ -244,10 +244,7 @@ Based on v2.0 profiling data:
    - Use `string_view` where possible
    - Potential: 5-9M instruction reduction
 
-4. **FieldDef Copy/Move (0.52%)** - Very Low Priority
-   - Consider in-place construction
-   - Use `emplace_back` instead of `push_back`
-   - Potential: 1.3M instruction reduction
+4. ~~FieldDef Copy/Move (0.52%)~~ - **DONE** (v3.1: copy elimination + index sort, -3.4M instructions)
 
 **Non-Optimizable** (77.8% of execution):
 - ClangTool/LLVM infrastructure (34.8%)
@@ -434,7 +431,7 @@ Phase 4a wrapper elimination successfully achieved:
 - ✅ **Zero information loss**: Each StructDef knows its sourceFile, operations group internally
 - ✅ **Maintainability**: Easier to understand, fewer abstractions, clearer data flow
 
-### Cumulative Performance Improvements (v1.0 → v2.9)
+### Cumulative Performance Improvements (v1.0 → v3.0)
 
 | Version | Instructions | Change from v1.0 | Cumulative Improvement |
 |---------|-------------|------------------|------------------------|
@@ -447,9 +444,11 @@ Phase 4a wrapper elimination successfully achieved:
 | v2.6 (code cleanup + refactoring) | 194,443,179 | -78.8M (-28.8%) | 28.8% |
 | v2.7 (safety + validation) | 196,604,356 | -76.7M (-28.1%) | 28.1% |
 | v2.8 (CRTP + template pipeline) | 127,783,834 | -145.5M (-53.2%) | 53.2% |
-| **v2.9 (compiler adapter refactor)** | **119,614,824** | **-153.7M (-56.2%)** | **56.2%** |
+| v2.9 (compiler adapter refactor) | 119,614,824 | -153.7M (-56.2%) | 56.2% |
+| v3.0 (path→string + buffer caching) | 106,669,829 | -166.6M (-61.0%) | 61.0% |
+| **v3.1 (copy elimination + index sort)** | **103,057,452** | **-170.2M (-62.3%)** | **62.3%** |
 
-**Total Performance Gain: 56.2% reduction in instructions since v1.0**
+**Total Performance Gain: 62.3% reduction in instructions since v1.0**
 
 ## Safety & Validation Improvements (v2.7 - 2025-10-28)
 
@@ -555,12 +554,12 @@ After refactoring compiler adapters from polymorphic inheritance to translator p
 
 **From**: Polymorphic inheritance with virtual function calls
 - `CompilationDatabaseBase` CRTP base class
-- `IARCompilationDatabase` and `MSVCCompilationDatabase` derived classes
+- `IarCompilationDatabase` and `MsvcCompilationDatabase` derived classes
 - Factory creates database objects polymorphically
 - ClangParser intercepts database calls via inheritance
 
 **To**: Translator pattern with composition
-- `IARDbTranslator` and `MSVCDbTranslator` - pure translation logic
+- `IarDbTranslator` and `MsvcDbTranslator` - pure translation logic
 - `ClangCompilationDatabaseAdapter` - wraps translated commands
 - `CompilationDatabaseFactory` - detects compiler, translates, wraps
 - ClangParser uses adapter directly without polymorphic interception
@@ -608,6 +607,158 @@ After refactoring compiler adapters from polymorphic inheritance to translator p
 2. ✅ **Better testability**: Translator functions can be unit tested without ClangTool
 3. ✅ **Cleaner architecture**: Detection → Translation → Adapter composition
 4. ✅ **No regression**: Wall-clock time unchanged
+
+---
+
+## Performance Optimization Pass (v3.0 - 2026-03-12)
+
+After refactoring `clang_struct_extractor.cpp` (helper function extraction, two edge case crash fixes), profiled to check for regressions and found optimization opportunities:
+
+### Instruction Count Comparison
+
+| Metric                 | v2.9 | v3.0 | Change |
+|------------------------|------|------|--------|
+| **Total Instructions** | 119,614,824 | **106,669,829** | **-12.9M (-10.8%)** |
+| **Wall-clock (callgrind)** | ~1,302ms | **~942ms** | -360ms (-28%) |
+
+### Optimization Changes
+
+**1. `std::filesystem::path` → `std::string` for stored path fields**
+
+Converted 5 data-carrying path fields that only store paths as strings (no path decomposition on the hot path):
+- `StructDef::sourceFile`, `RefactorRecipe::sourceFile`, `SAlignMetrics::sourceFile`
+- `TransmutationResult::file`, `FileStats::file`
+- All map keys using `std::filesystem::path` → `std::string`
+
+`std::filesystem::path` parses path components (`_M_split_cmpts`) on every copy. This was consuming ~3.9M instructions (3.2% of v2.9 total). After conversion: 57K instructions (0.05%) — **98.5% reduction in path overhead**.
+
+The 3 call sites that need `.filename()` (reporter display, temp file naming) use `std::filesystem::path(str).filename()` inline on the cold path.
+
+**2. Cached `getBufferData(fieldFileID)` in `extractField`**
+
+`getBufferData` was called independently in 3 methods per field:
+- `computeFieldByteOffset` — field byte offset correction
+- `extractSourceTypeInfo` — source-faithful type name extraction
+- `extractPrecedingComment` — preceding comment detection
+
+Fetched once in `extractField` and passed as `llvm::StringRef fieldBuf` to all 3 methods. Eliminates 2 redundant lookups per field (2000 fields in test workload).
+
+`extractTrailingComment` uses `getBufferData(getFileID(endPos))` — different FileID (endPos may be in a different file for BuiltinTypeLoc types), so it remains unchanged.
+
+### Component-Level Analysis (v3.0 - 106.7M instructions)
+
+| Component                  | Instructions | % of Total | Change from v2.9 |
+|----------------------------|--------------|------------|-------------------|
+| **Dynamic Linking**        | ~11.6M       | ~10.9%     | -0.1M (noise) |
+| **Memory Allocation**      | ~15.3M       | ~14.3%     | -2.9M (-16%) |
+| **Memory Operations**      | ~3.6M        | ~3.4%      | -0.6M (-14%) |
+| **LLVM Infrastructure**    | ~7.3M        | ~6.8%      | -1.2M (-14%) |
+| **Clang Lexer/Preprocessing** | ~4.8M     | ~4.5%      | -0.4M (-8%) |
+| **Clang Type System**      | ~4.0M        | ~3.8%      | -0.3M (-7%) |
+| **String Operations**      | ~2.6M        | ~2.4%      | -0.5M (-16%) |
+| **Filesystem Operations**  | ~0.1M        | ~0.1%      | **-2.5M (-96%)** |
+| **Clang Source Manager**   | ~2.4M        | ~2.3%      | -0.4M (-14%) |
+| **Alchemy Code**           | ~5.7M        | ~5.3%      | +4.6M (expanded tracking) |
+
+### Alchemy-Specific Functions (Top 10)
+
+**Total Alchemy Code: 5.7M instructions (5.3% of total)**
+
+| Function | Instructions | % of Total |
+|----------|--------------|------------|
+| `StructExtractor::extractField` | 897,000 | 0.84% |
+| `StructExtractor::extractPrecedingComment` | 863,704 | 0.81% |
+| `FieldDef` copy constructor | 792,000 | 0.74% |
+| `FieldDef` move assignment | 791,500 | 0.74% |
+| `StructExtractor::extractTrailingComment` | 684,500 | 0.64% |
+| `StructExtractor::extractStruct` | 467,500 | 0.44% |
+| `buildReplacementText` | 314,500 | 0.29% |
+| `StructExtractor::extractSourceTypeInfo` | 260,000 | 0.24% |
+| `StructAlignmentOperation::analyzeStruct` | 253,004 | 0.24% |
+| `FieldDef` destructor (vector cleanup) | 251,533 | 0.24% |
+
+### std::ranges/algorithm Analysis
+
+Examined 15 raw loops across 5 hot-path files (`clang_struct_extractor.cpp`, `salign_operation.cpp`, `transmute.cpp`, `pipeline.cpp`, `salign_reporter.cpp`). No opportunities found — the v2.5 pass already converted meaningful cases. Remaining loops have character-level buffer scanning or complex control flow where manual iteration is the correct choice.
+
+### Key Findings
+
+1. **`std::filesystem::path` was a hidden bottleneck**: 3.2% of total execution spent parsing path components on copies — eliminated by storing paths as `std::string`
+2. **Buffer caching saves redundant lookups**: Fetching `getBufferData` once instead of 3x per field reduces source manager overhead
+3. **Cascading savings**: Removing path objects reduces memory allocation churn (fewer heap allocations for path component lists), reducing `_int_malloc`/`_int_free` costs
+4. **10.8% improvement from data type optimization**: No algorithmic changes — purely eliminating unnecessary object construction overhead
+
+### Remaining Optimization Opportunities (Post-v3.0)
+
+**High Priority** (still significant):
+1. ClangTool/LLVM initialization (~45%, ~48M instructions) - per-file overhead dominates
+2. Memory allocation churn (~14%, ~15M instructions) - reduced from v2.9 but still significant
+
+**Low Priority** (diminishing returns):
+3. ~~FieldDef copy/move overhead~~ - **DONE** (v3.1: copy elimination + index sort, -3.4M)
+4. `getBufferData` remaining calls (~540K, ~0.5%) - from `extractTrailingComment` (different FileID, cannot cache)
+
+---
+
+## Copy Elimination + Index Sort (v3.1 - 2026-03-13)
+
+After eliminating unnecessary FieldDef copies in the parser and switching sort-by-alignment from copying full structs to sorting indices:
+
+### Instruction Count Comparison
+
+| Metric                 | v3.0 | v3.1 | Change |
+|------------------------|------|------|--------|
+| **Total Instructions** | 106,669,829 | **103,057,452** | **-3.6M (-3.4%)** |
+
+### Optimization Changes
+
+**1. Eliminate FieldDef copy in `extractStruct`** (`clang_struct_extractor.cpp:524`)
+
+Before: `FieldDef field = fieldResult.value()` copies the entire FieldDef (8 strings) from the Result variant, then immediately moves it into the vector.
+
+After: Access via `fieldResult.value().isBitField` reference, then `std::move(fieldResult).value()` directly into `addField()`. Eliminates copy constructor entirely on this path.
+
+**2. Move strings in `extractField`** (`clang_struct_extractor.cpp:415-466`)
+
+`FieldName` and `TypeName` were `const std::string`, preventing `std::move` into the FieldDef constructor (silently degrades to copy). Removed `const`, renamed to camelCase (`fieldName`, `typeName`), and `std::move` both into the constructor.
+
+**3. Index-based sort in `sortFieldsByAlignment`** (`salign_operation.cpp:68-87`)
+
+Before: Copies the entire `vector<FieldDef>` (all strings), then `stable_sort` swaps full FieldDef objects (move assignment per swap).
+
+After: Creates `vector<size_t>` indices, sorts indices by comparing `fields[idx]`. Zero FieldDef copies or moves during sort. Added `computeSize` overload that iterates by index order.
+
+**4. Result default constructor** (`core.hpp:147`)
+
+Changed sentinel string from `"m_data::uninitialized"` (21 chars, exceeds libstdc++ SSO of 15 bytes, heap-allocates) to `std::string{}` (empty, SSO, no heap allocation). Every `Result::success()` call default-constructs then immediately overwrites.
+
+### Alchemy-Specific Function Comparison
+
+| Function | v3.0 | v3.1 | Delta |
+|----------|------|------|-------|
+| `FieldDef::FieldDef(copy)` | 792,000 | 264,000 | **-528,000 (-66.7%)** |
+| `FieldDef::operator=(move)` | 791,500 | 0 | **-791,500 (-100%)** |
+| `extractStruct` | 467,500 | 422,000 | **-45,500 (-9.7%)** |
+| `_Destroy<FieldDef*>` | 251,533 | 144,533 | **-107,000 (-42.5%)** |
+| `vector<FieldDef>(copy)` | 71,000 | 35,500 | **-35,500 (-50%)** |
+| `sortFieldsByAlignment` | — | 62,000 | +62,000 (now sorts `size_t`) |
+
+### Key Findings
+
+1. **`FieldDef::operator=(move)` completely eliminated**: 791K instructions gone — no more moving full FieldDef objects during sort
+2. **FieldDef copies reduced 66.7%**: Remaining 264K copies are from recipe generation (legitimate, needs sorted field data for overlap detection)
+3. **Index-based sort is the biggest single win**: Sorting `size_t` indices instead of 8-string structs eliminates both copy and move overhead
+4. **`const` silently prevents moves**: A subtle but common C++ performance trap — `const std::string` parameters passed to by-value constructors always copy
+
+### Remaining Optimization Opportunities (Post-v3.1)
+
+**High Priority** (still significant):
+1. ClangTool/LLVM initialization (~45%) - per-file overhead dominates
+2. Memory allocation churn (~14%) - consider arena allocator
+
+**Low Priority** (diminishing returns):
+3. `getBufferData` remaining calls (~540K, ~0.5%) - from `extractTrailingComment` (different FileID, cannot cache)
+4. Remaining FieldDef copies (264K, 0.26%) - from recipe generation, legitimate
 
 ---
 
@@ -797,6 +948,8 @@ The 4.9% instruction reduction came from three **code quality improvements**:
 5. ~~Discovery~~ - **DONE** (v1.2: negligible)
 6. ~~ParseResults wrapper~~ - **DONE** (v2.4: eliminated, -3.5%)
 7. ~~Raw loops~~ - **DONE** (v2.5: STL algorithms, -4.9%)
+8. ~~Filesystem path overhead~~ - **DONE** (v3.0: path→string, -98.5% path overhead)
+9. ~~Redundant buffer lookups~~ - **DONE** (v3.0: getBufferData caching)
 
 ### Architecture Validation
 
@@ -809,6 +962,164 @@ Phase v2.5 refactoring successfully achieved:
 ### Build System Note
 
 **IMPORTANT:** After switching to enforced clang compilation (for LLVM/libclang ABI compatibility), added `-gdwarf-4` to debug flags in CMakeLists.txt. Clang 14 defaults to DWARF 5, which valgrind 3.18.1 doesn't fully support. This ensures profiling compatibility going forward.
+
+## Cross-Compiler Support + Dependency Graph (v4.0 - 2026-03-19)
+
+After adding GCC/MSVC/IAR cross-compiler support, `buildReverseDepMap` (clang -MM dep graph),
+CLI/config overhaul, and logging refactoring:
+
+### Instruction Count Comparison
+
+| Metric                 | v3.1 | v4.0 | Change |
+|------------------------|------|------|--------|
+| **Total Instructions** | 103,057,452 | **108,345,541** | **+5.3M (+5.1%)** |
+| **Wall-clock (callgrind)** | — | **2,677ms** | — |
+| **Wall-clock (native)** | ~75ms | **~69ms** | **-6ms (-8%)** |
+
+### What Changed
+
+**New infrastructure added since v3.1:**
+- `buildReverseDepMap`: runs `clang -MM` per compile command to map headers → TUs
+- Compiler adapter detection: GCC/MSVC/IAR database detection + flag translation
+- Config file parsing (`alchemy.toml` via tomlplusplus)
+- Logger (`spdlog`-style structured output to log file)
+- CLI overhaul: `ParseCommandLineOptions` replaces `CommonOptionsParser`
+
+### Why Instructions Are Up 5.1%
+
+The +5.3M instructions are **entirely in-process overhead** from new code paths:
+compiler detection, dep graph data structure setup, config parsing, and logging infrastructure.
+This is expected — each new subsystem adds cost at startup.
+
+**Critical caveat**: `buildReverseDepMap` spawns `clang -MM` as **separate processes**.
+Callgrind only measures in-process instructions. The dep graph subprocess overhead
+(the actual regression for large projects) is **not captured here**.
+
+For the performance test (1 compile command), 1 subprocess was spawned but resolved
+0 specs (test headers are direct — not included by any TU). Wall-clock is actually
+6ms faster than v3.1 because the 5 direct-parse headers hit a streamlined code path.
+
+### Real-World Performance Concern
+
+For `pf_firmware` (~500+ compile commands in `firmware-debug-hw1-0`):
+- `buildReverseDepMap` runs `clang -MM` sequentially for every unexcluded command
+- Each subprocess: ~100-200ms startup + preprocessing time
+- Sequential execution: O(N) × subprocess overhead = potentially 30-100+ seconds
+- **This is the primary performance regression**, not captured by callgrind
+
+The callgrind baseline remains valid for in-process hotspot tracking.
+For dep graph performance, wall-clock timing against a real project is the metric.
+
+### Component-Level Analysis (v4.0 - 108.3M instructions)
+
+Self-cost breakdown (exclusive instruction counts from callgrind):
+
+| Component | Self IR | % of Total | Notes |
+|-----------|---------|------------|-------|
+| llvm::StringMapImpl::LookupBucketFor | 1,525,075 | 1.41% | Identifier lookups |
+| clang::Lexer::LexTokenInternal | 1,302,985 | 1.20% | Tokenization |
+| llvm::BumpPtrAllocator::Allocate | 1,039,625 | 0.96% | LLVM arena allocation |
+| **alchemy::StructExtractor::extractField** | **899,000** | **0.83%** | **Hottest alchemy fn** |
+| clang::ASTContext::toBits | 661,500 | 0.61% | Type size queries |
+| _int_free | 547,675 | 0.51% | heap free |
+| **alchemy::buildReplacementText** | **314,500** | **0.29%** | Recipe text construction |
+| **alchemy::FieldDef copy constructor** | **264,000** | **0.24%** | Remaining copies (recipe gen) |
+
+**Total alchemy self-cost: 2,805,578 IR (2.6%)**
+
+This is consistent with v3.1 — alchemy-owned code unchanged, visibility matches prior counts.
+
+### Alchemy-Specific Hotspots (Self Cost)
+
+| Function | Self IR | % of Total |
+|----------|---------|------------|
+| `StructExtractor::extractField` | 899,000 | 0.83% |
+| `buildReplacementText` | 314,500 | 0.29% |
+| `FieldDef` copy constructor | 264,000 | 0.24% |
+| `_Destroy<FieldDef*>` (vector cleanup) | 148,505 | 0.14% |
+| `applyRefactor` | 123,608 | 0.11% |
+| `ClangStructParsingRule::run` | 103,500 | 0.10% |
+
+### Key Findings
+
+1. **In-process code unchanged**: Alchemy hotspots match v3.1 exactly — no regression in core parsing/transmutation
+2. **+5.1% from new subsystems**: Compiler detection, dep graph setup, config parsing, logging — expected, acceptable
+3. **Wall-clock faster**: 69ms vs 75ms — direct parse path benefits from streamlined spec resolution
+4. **Real regression is subprocesses**: `buildReverseDepMap` sequential `clang -MM` invocations are O(N) and not captured by callgrind
+5. **Fix target**: Parallelizing `buildReverseDepMap` using the existing `--jobs` thread pool is the primary optimization opportunity
+
+### Optimization Priority (Post-v4.0)
+
+**High Priority**:
+1. ~~**`buildReverseDepMap` parallelization**~~ — **DONE** (v4.1: 65s→19s on pf_firmware, 3.4×)
+
+**Low Priority** (diminishing returns on in-process path):
+2. ClangTool/LLVM initialization (~45% in-process) — per-file, not easily reduced
+3. Memory allocation (~14%) — arena allocator would help but complex
+
+---
+
+## buildReverseDepMap Parallelization + --debug Flag (v4.1 - 2026-03-19)
+
+### Wall-Clock Improvement (pf_firmware, ~500 compile commands)
+
+| Metric | v4.0 | v4.1 | Change |
+|--------|-------|------|--------|
+| **Wall-clock (native, pf_firmware)** | ~65s | **~19s** | **-46s (-70.8%, 3.4×)** |
+
+**Changes**: `buildReverseDepMap` parallelized using `hardware_concurrency()` (partition-and-merge,
+no API change). `--debug` flag added with level-gated logging (zero-cost `logger::debug()` calls
+when not in debug mode).
+
+### Real-World Callgrind Profile (pf_firmware, 315 source files)
+
+| Metric | Value |
+|--------|-------|
+| **Total IR** | 129,805,537,060 (130B) |
+| **Alchemy self IR** | 46,372,659 (0.036%) |
+| **libclang/LLVM** | ~99.96% |
+
+**Top alchemy self-cost functions**:
+
+| Function | Self IR | % of 130B |
+|----------|---------|-----------|
+| `DepEntry::~DepEntry()` | 5,384,648 | 0.004% |
+| `GccDbTranslator::gccToClangTranslation()` | 4,584,998 | 0.004% |
+| `FieldDef::FieldDef(copy)` | 4,295,970 | 0.003% |
+| `ClangStructParsingRule::run()` | 1,574,261 | 0.001% |
+
+**Key finding**: On real workloads, alchemy's own code is 0.036% of total IR. libclang AST
+parsing dominates completely. No meaningful in-process optimization remains — further wall-clock
+wins require reducing ClangTool invocation count or subprocess parallelism.
+
+**Note**: Debug ≈ Release wall-clock because the bottleneck is subprocess wait time
+(kernel fork/exec + clang preprocessing), not alchemy's own instruction throughput.
+
+---
+
+## Cumulative Table (updated)
+
+| Version | Instructions | Change from v1.0 | Cumulative Improvement |
+|---------|-------------|------------------|------------------------|
+| v1.0 (baseline) | 273,272,735 | - | - |
+| v1.2 (discovery + transmute) | 262,332,164 | -10.9M (-4.0%) | 4.0% |
+| v2.0 (orchestrator refactor) | 258,393,231 | -14.9M (-5.4%) | 5.4% |
+| v2.1 (parser + I/O) | 210,984,043 | -62.3M (-22.8%) | 22.8% |
+| v2.4 (wrapper elimination) | 203,596,351 | -69.7M (-25.5%) | 25.5% |
+| v2.5 (algorithms + error handling) | 193,663,523 | -79.6M (-29.1%) | 29.1% |
+| v2.6 (code cleanup + refactoring) | 194,443,179 | -78.8M (-28.8%) | 28.8% |
+| v2.7 (safety + validation) | 196,604,356 | -76.7M (-28.1%) | 28.1% |
+| v2.8 (CRTP + template pipeline) | 127,783,834 | -145.5M (-53.2%) | 53.2% |
+| v2.9 (compiler adapter refactor) | 119,614,824 | -153.7M (-56.2%) | 56.2% |
+| v3.0 (path→string + buffer caching) | 106,669,829 | -166.6M (-61.0%) | 61.0% |
+| v3.1 (copy elimination + index sort) | 103,057,452 | -170.2M (-62.3%) | 62.3% |
+| **v4.0 (cross-compiler + dep graph)** | **108,345,541** | **-164.9M (-60.3%)** | **60.3%** |
+| **v4.1 (dep graph parallelization + --debug)** | *(not re-run, wall-clock: 65s→19s on pf_firmware)* | — | — |
+
+**Note**: v4.0 regression (+5.1%) is infrastructure cost for cross-compiler support and dep graph.
+The dep graph's actual cost (subprocess invocations) is not captured in this metric.
+
+---
 
 ## Notes
 - Profiling performed on WSL2 (Ubuntu on Windows)
@@ -823,6 +1134,10 @@ Phase v2.5 refactoring successfully achieved:
 - v2.6 refactoring: Code cleanup + helper function extraction (2025-01-25)
 - v2.7 improvements: Safety + validation (compilation database, conflict resolution, fatal error detection) (2025-10-28)
 - v2.8 refactoring: CRTP for operations + template-based pipeline for dependency injection (2025-10-29)
+- v3.0 optimization: std::filesystem::path → std::string + getBufferData caching (2026-03-12)
+- v3.1 optimization: FieldDef copy elimination + index-based sort (2026-03-13)
+- v4.0 infrastructure: cross-compiler support, dep graph, config, logging (2026-03-19)
+- v4.1 optimization: buildReverseDepMap parallelization (65s→19s on pf_firmware), --debug flag + level-gated logging (2026-03-19)
 
 ## 🔧 Optimization ideas:
 

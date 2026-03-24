@@ -17,19 +17,26 @@
 
 namespace alchemy::operation::refactoring {
 
-struct StructAnalysis {
-  std::vector<alchemy::operation::detail::RefactorRecipe> recipes;
-  alchemy::metrics::detail::SAlignMetrics metrics;
+namespace detail {
+
+// build source-faithful replacement text for a reordered field
+std::string
+buildReplacementText(const alchemy::parser::artifacts::FieldDef& field);
+
+}  // namespace detail
+
+struct StructOptimization {
+  std::vector<alchemy::operation::RefactorRecipe> recipes;
+  alchemy::metrics::SAlignMetrics metrics;
 };
 
 class StructAlignmentOperation {
 public:
-  double
-  calculatePercentage(std::size_t numerator, std::size_t denominator) const;
+  // typical cache line size for struct packing analysis
+  static constexpr std::size_t CacheLineBytes = 64;
 
   // cache metrics result
   struct CacheMetrics {
-    double spclScore;
     std::size_t cacheWaste;
     double cacheUtil;
   };
@@ -38,12 +45,12 @@ public:
   computeCacheMetrics(std::size_t structSize) const;
 
   // sort fields for optimal alignment: reorderable first (by alignment desc),
-  // then non-reorderable
-  std::vector<alchemy::parser::artifacts::FieldDef>
+  // then non-reorderable — returns sorted indices into the fields vector
+  std::vector<std::size_t>
   sortFieldsByAlignment(
       const std::vector<alchemy::parser::artifacts::FieldDef>& fields) const;
 
-  StructAnalysis
+  StructOptimization
   analyzeStruct(const alchemy::parser::artifacts::StructDef& structDef) const;
 
   alchemy::parser::ParsingRequirements

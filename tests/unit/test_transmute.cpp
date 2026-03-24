@@ -22,8 +22,8 @@ protected:
   SetUp() override
   {
     // create temp directory for test files
-    tempDir = std::filesystem::temp_directory_path() / "alchemy_transmute_test";
-    std::filesystem::create_directories(tempDir);
+    tempDir = alchemy::testing::utils::createTempTestDirectory(
+        "alchemy_transmute_test", false);
   }
 
   void
@@ -51,8 +51,7 @@ TEST_F(TransmuteTest, AppliesSingleRecipe)
   std::vector<alchemy::operation::Recipe> recipes;
   recipes.push_back(utils::createRecipe(TestFile, 7, 6, "REPLACED LINE 2"));
 
-  auto result = alchemy::transmute::applyRecipes(
-      TestFile, recipes, std::filesystem::path{}, false);
+  auto result = alchemy::transmute::applyRecipes(TestFile, recipes, false);
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::transmute should succeed";
@@ -83,11 +82,12 @@ TEST_F(TransmuteTest, AppliesMultipleRecipes)
       utils::createRecipe(TestFile, 0, 6, "REPLACED 1"));  // line 1 at offset 0
   recipes.push_back(
       utils::createRecipe(TestFile, 7, 6, "REPLACED 2"));  // line 2 at offset 7
-  recipes.push_back(utils::createRecipe(
-      TestFile, 21, 6, "REPLACED 4"));  // line 4 at offset 21
+  recipes.push_back(utils::createRecipe(TestFile,
+                                        21,
+                                        6,
+                                        "REPLACED 4"));  // line 4 at offset 21
 
-  auto result = alchemy::transmute::applyRecipes(
-      TestFile, recipes, std::filesystem::path{}, false);
+  auto result = alchemy::transmute::applyRecipes(TestFile, recipes, false);
 
   ASSERT_TRUE(result.valid());
 
@@ -110,8 +110,8 @@ TEST_F(TransmuteTest, HandlesNonexistentFile)
   std::vector<alchemy::operation::Recipe> recipes;
   recipes.push_back(utils::createRecipe(NonexistentFile, 0, 5, "replacement"));
 
-  auto result = alchemy::transmute::applyRecipes(
-      NonexistentFile, recipes, std::filesystem::path{}, false);
+  auto result =
+      alchemy::transmute::applyRecipes(NonexistentFile, recipes, false);
 
   ASSERT_FALSE(result.valid())
       << "alchemy::testing::unit::transmute should fail for nonexistent file";
@@ -129,8 +129,7 @@ TEST_F(TransmuteTest, HandlesOutOfBoundsByteOffset)
   std::vector<alchemy::operation::Recipe> recipes;
   recipes.push_back(utils::createRecipe(TestFile, 100, 5, "out of bounds"));
 
-  auto result = alchemy::transmute::applyRecipes(
-      TestFile, recipes, std::filesystem::path{}, false);
+  auto result = alchemy::transmute::applyRecipes(TestFile, recipes, false);
 
   ASSERT_FALSE(result.valid()) << "alchemy::testing::unit::transmute should "
                                   "fail for out of bounds byte offset";
@@ -146,8 +145,7 @@ TEST_F(TransmuteTest, HandlesEmptyRecipes)
 
   const std::vector<alchemy::operation::Recipe> Recipes;  // empty
 
-  auto result = alchemy::transmute::applyRecipes(
-      TestFile, Recipes, std::filesystem::path{}, false);
+  auto result = alchemy::transmute::applyRecipes(TestFile, Recipes, false);
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::transmute should succeed with empty recipes";
@@ -189,8 +187,7 @@ TEST_F(TransmuteTest, ReordersStructFields)
   recipes.push_back(
       utils::createRecipe(TestFile, 69, 21, "    char smallField;\n"));
 
-  auto result = alchemy::transmute::applyRecipes(
-      TestFile, recipes, std::filesystem::path{}, false);
+  auto result = alchemy::transmute::applyRecipes(TestFile, recipes, false);
 
   ASSERT_TRUE(result.valid());
 
@@ -217,8 +214,7 @@ TEST_F(TransmuteTest, HandlesEmptyFile)
   std::vector<alchemy::operation::Recipe> recipes;
   recipes.push_back(utils::createRecipe(TestFile, 0, 5, "line 1"));
 
-  auto result = alchemy::transmute::applyRecipes(
-      TestFile, recipes, std::filesystem::path{}, false);
+  auto result = alchemy::transmute::applyRecipes(TestFile, recipes, false);
 
   // should fail because byte range [0, 5) is out of bounds for empty file
   ASSERT_FALSE(result.valid()) << "alchemy::testing::unit::transmute should "
@@ -236,8 +232,7 @@ TEST_F(TransmuteTest, HandlesByteOffsetZero)
   std::vector<alchemy::operation::Recipe> recipes;
   recipes.push_back(utils::createRecipe(TestFile, 0, 6, "FIRST LINE"));
 
-  auto result = alchemy::transmute::applyRecipes(
-      TestFile, recipes, std::filesystem::path{}, false);
+  auto result = alchemy::transmute::applyRecipes(TestFile, recipes, false);
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::transmute should succeed for byte offset 0";
@@ -259,8 +254,7 @@ TEST_F(TransmuteTest, HandlesBoundaryExactFileSize)
   std::vector<alchemy::operation::Recipe> recipes;
   recipes.push_back(utils::createRecipe(TestFile, 5, 5, "ABCDE"));
 
-  auto result = alchemy::transmute::applyRecipes(
-      TestFile, recipes, std::filesystem::path{}, false);
+  auto result = alchemy::transmute::applyRecipes(TestFile, recipes, false);
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::transmute should succeed when byteOffset + "
@@ -283,8 +277,7 @@ TEST_F(TransmuteTest, HandlesBoundaryExceedsFileSizeByOne)
   std::vector<alchemy::operation::Recipe> recipes;
   recipes.push_back(utils::createRecipe(TestFile, 5, 6, "ABCDEF"));
 
-  auto result = alchemy::transmute::applyRecipes(
-      TestFile, recipes, std::filesystem::path{}, false);
+  auto result = alchemy::transmute::applyRecipes(TestFile, recipes, false);
 
   ASSERT_FALSE(result.valid())
       << "alchemy::testing::unit::transmute should fail when byteOffset + "
@@ -304,8 +297,7 @@ TEST_F(TransmuteTest, RefactorDryRunDoesNotModifyFile)
   recipes.push_back(utils::createRecipe(TestFile, 7, 6, "REPLACED"));
 
   // apply with dry run enabled
-  auto result = alchemy::transmute::applyRecipes(
-      TestFile, recipes, std::filesystem::path{}, true);
+  auto result = alchemy::transmute::applyRecipes(TestFile, recipes, true);
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::dry run should succeed";
@@ -327,13 +319,10 @@ TEST_F(TransmuteTest, ConfigFieldsAccessibleButNotUsed)
   std::vector<alchemy::operation::Recipe> recipes;
   recipes.push_back(utils::createRecipe(TestFile, 7, 6, "REPLACED"));
 
-  // apply with buildDir parameter (other fields not needed by transmute)
-  auto result = alchemy::transmute::applyRecipes(
-      TestFile, recipes, std::filesystem::path{"/build"}, false);
+  auto result = alchemy::transmute::applyRecipes(TestFile, recipes, false);
 
   ASSERT_TRUE(result.valid())
-      << "alchemy::testing::unit::config with various fields should not "
-         "break transmutation";
+      << "alchemy::testing::unit::transmutation should succeed";
 
   // verify transmutation succeeded
   const std::string ActualContent = utils::readFile(TestFile);

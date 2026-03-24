@@ -1,28 +1,32 @@
 // src/pipeline/preflight_validator.cpp
+#include "pipeline/preflight_validator.hpp"
+
 // std
 #include <filesystem>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <variant>
 #include <vector>
 
 // 3rd party
-#include "fmt/core.h"
+#include <fmt/core.h>
 
 // local
 #include "app/core/core.hpp"
 #include "operation/operation_base.hpp"
-#include "pipeline/preflight_validator.hpp"
 
 // helper: check if file exists
 alchemy::core::Result<std::monostate>
 alchemy::pipeline::preflight_validator::detail::checkIfFileExists(
-    const std::filesystem::path& file)
+    std::string_view file)
 {
   if (!std::filesystem::exists(file))
   {
     return alchemy::core::Result<std::monostate>::failure(
-        alchemy::core::Error::format(
-            "alchemy::transmute", "file does not exist: {}", file.string()));
+        alchemy::core::Error::format("alchemy::pipeline::preflight_validator",
+                                     "file does not exist: {}",
+                                     file));
   }
   return alchemy::core::Result<std::monostate>::success(std::monostate{});
 }
@@ -30,13 +34,14 @@ alchemy::pipeline::preflight_validator::detail::checkIfFileExists(
 // helper: check if path is a regular file
 alchemy::core::Result<std::monostate>
 alchemy::pipeline::preflight_validator::detail::checkIsRegularFile(
-    const std::filesystem::path& file)
+    std::string_view file)
 {
   if (!std::filesystem::is_regular_file(file))
   {
     return alchemy::core::Result<std::monostate>::failure(
-        alchemy::core::Error::format(
-            "alchemy::transmute", "not a regular file: {}", file.string()));
+        alchemy::core::Error::format("alchemy::pipeline::preflight_validator",
+                                     "not a regular file: {}",
+                                     file));
   }
   return alchemy::core::Result<std::monostate>::success(std::monostate{});
 }
@@ -44,15 +49,16 @@ alchemy::pipeline::preflight_validator::detail::checkIsRegularFile(
 // helper: check if file is writable
 alchemy::core::Result<std::monostate>
 alchemy::pipeline::preflight_validator::detail::checkIsFileWritable(
-    const std::filesystem::path& file)
+    std::string_view file)
 {
   auto perms = std::filesystem::status(file).permissions();
   if ((perms & std::filesystem::perms::owner_write) ==
       std::filesystem::perms::none)
   {
     return alchemy::core::Result<std::monostate>::failure(
-        alchemy::core::Error::format(
-            "alchemy::transmute", "file is not writable: {}", file.string()));
+        alchemy::core::Error::format("alchemy::pipeline::preflight_validator",
+                                     "file is not writable: {}",
+                                     file));
   }
   return alchemy::core::Result<std::monostate>::success(std::monostate{});
 }
@@ -60,9 +66,11 @@ alchemy::pipeline::preflight_validator::detail::checkIsFileWritable(
 // helper: check if parent directory is writable
 alchemy::core::Result<std::monostate>
 alchemy::pipeline::preflight_validator::detail::checkIsParentDirWritable(
-    const std::filesystem::path& file)
+    std::string_view file)
 {
-  auto parentPerms = std::filesystem::status(file.parent_path()).permissions();
+  auto parentPerms =
+      std::filesystem::status(std::filesystem::path(file).parent_path())
+          .permissions();
   if ((parentPerms & std::filesystem::perms::owner_write) ==
       std::filesystem::perms::none)
   {
@@ -70,14 +78,14 @@ alchemy::pipeline::preflight_validator::detail::checkIsParentDirWritable(
         alchemy::core::Error::format(
             "alchemy::pipeline::preflight_validator::checkIsParentDirWritable",
             "directory is not writable: {}",
-            file.parent_path().string()));
+            std::filesystem::path(file).parent_path().string()));
   }
   return alchemy::core::Result<std::monostate>::success(std::monostate{});
 }
 
 alchemy::core::Result<std::monostate>
 alchemy::pipeline::preflight_validator::checkIfCanApplyRecipe(
-    const std::filesystem::path& file)
+    std::string_view file)
 {
   if (auto result = detail::checkIfFileExists(file); result.invalid())
   {
@@ -104,7 +112,7 @@ alchemy::pipeline::preflight_validator::checkIfCanApplyRecipe(
 
 alchemy::core::Result<std::monostate>
 alchemy::pipeline::preflight_validator::checkIfCanApplyRecipes(
-    const std::unordered_map<std::filesystem::path,
+    const std::unordered_map<std::string,
                              std::vector<alchemy::operation::Recipe>>&
         allRecipes)
 {

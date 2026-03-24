@@ -1,23 +1,24 @@
 // src/app/app.cpp
+#include "app/app.hpp"
+
 // std
 #include <cstdint>
 #include <cstdlib>
 
 #include <exception>
+#include <filesystem>
 #include <memory>
 #include <utility>
 #include <vector>
 
-// 3rd party
+// local
+#include "app/color.hpp"
 #include "app/core/core.hpp"
 #include "cli/cli.hpp"
-#include "fmt/core.h"
-
-// local
-#include "app/app.hpp"
-#include "app/color.hpp"
+#include "cli/config_parser.hpp"
 #include "config/config.hpp"
 #include "files/discovery.hpp"
+#include "logger/logger.hpp"
 #include "operation/operation.hpp"
 #include "parsing/libclang/clang_parser.hpp"
 #include "parsing/parser.hpp"
@@ -29,6 +30,16 @@ alchemy::App::create(alchemy::cli::ParsedOptions options)
 {
   try
   {
+    alchemy::logger::debug(
+        "alchemy::App::create: rootDir={}, buildDir={}, outputDir={}, "
+        "salign={}, dryRun={}, jobs={}\n",
+        options.rootDir.string(),
+        options.buildDir.string(),
+        options.outputDir.string(),
+        options.enableSalign,
+        options.enableDryRun,
+        options.jobs);
+
     if (!std::filesystem::exists(options.buildDir))
     {
       return alchemy::core::Result<alchemy::App>::failure(
@@ -36,9 +47,9 @@ alchemy::App::create(alchemy::cli::ParsedOptions options)
                                        "build dir does not exist for: {}",
                                        options.buildDir.string()));
     }
-    fmt::print("alchemy::{}transmuting{}...\n",
-               alchemy::color::ansi::BrightGreen,
-               alchemy::color::ansi::Reset);
+    alchemy::logger::info("alchemy::{}discovery{}::finding sources...\n",
+                          alchemy::color::ansi::BoldBrightGreen,
+                          alchemy::color::ansi::Reset);
     auto discoveryResult = alchemy::discovery::discoverFiles(
         options.sourcePatterns, options.excludePatterns, options.jobs);
 
@@ -51,10 +62,18 @@ alchemy::App::create(alchemy::cli::ParsedOptions options)
     }
 
     alchemy::config::AppConfig context;
+
+    context.rootDir = options.rootDir;
     context.cliArgs = std::move(options);
+
     auto discoveryValue = std::move(discoveryResult).value();
     context.inventory.sourceFiles = std::move(discoveryValue.sourceFiles);
     context.inventory.excludedFiles = std::move(discoveryValue.excludedFiles);
+
+    if (context.cliArgs.dumpConfig)
+    {
+      alchemy::config::parser::dumpConfig(context.rootDir, context.cliArgs);
+    }
 
     return alchemy::core::Result<alchemy::App>::success(
         App{std::move(context)});
@@ -64,21 +83,6 @@ alchemy::App::create(alchemy::cli::ParsedOptions options)
     return alchemy::core::Result<App>::failure(alchemy::core::Error::format(
         "alchemy::App::create", "exception: {}", e.what()));
   }
-}
-
-alchemy::core::Result<alchemy::App>
-alchemy::App::createFromCli(int argc, const char** argv)
-{
-  auto parseResult = alchemy::cli::parseCli(argc, argv);
-  if (parseResult.invalid())
-  {
-    return alchemy::core::Result<App>::failure(
-        alchemy::core::Error::format("alchemy::App::createFromCli",
-                                     "cli parsing failed: {}",
-                                     std::move(parseResult).error()));
-  }
-
-  return alchemy::App::create(std::move(parseResult).value());
 }
 
 // app-specific helper functions
@@ -101,9 +105,9 @@ alchemy::App::exec()
 {
   if (context().inventory.sourceFiles.empty())
   {
-    fmt::print("alchemy::{}no source files to process{}\n",
-               alchemy::color::ansi::Magenta,
-               alchemy::color::ansi::Reset);
+    alchemy::logger::warn("alchemy::{}no source files to process{}\n",
+                          alchemy::color::ansi::Magenta,
+                          alchemy::color::ansi::Reset);
     return EXIT_SUCCESS;
   }
 
@@ -112,14 +116,21 @@ alchemy::App::exec()
     // create parser backend
     std::unique_ptr<alchemy::parser::ParsingRuleAdapter> parser;
 
+    alchemy::logger::debug(
+        "alchemy::App::exec: discovery -> parser: {} source file(s), "
+        "buildDir={}\n",
+        alchemy::App::context().inventory.sourceFiles.size(),
+        alchemy::App::context().cliArgs.buildDir.string());
+
     alchemy::core::Result<std::unique_ptr<alchemy::parser::ClangParser>>
         clangResult = alchemy::parser::ClangParser::create(
             alchemy::App::context().inventory.sourceFiles,
-            alchemy::App::context().cliArgs.buildDir);
+            alchemy::App::context().cliArgs.buildDir,
+            alchemy::App::context().cliArgs.excludePatterns);
 
     if (clangResult.invalid())
     {
-      fmt::print(
+      alchemy::logger::error(
           "{}",
           alchemy::core::Error::format("alchemy::App::exec",
                                        "failed to create clang parser: {}",
@@ -132,17 +143,21 @@ alchemy::App::exec()
     const std::vector<alchemy::operation::RecipeOperation> Operations =
         alchemy::App::createRecipeOperations(alchemy::App::context());
 
+    alchemy::logger::debug(
+        "alchemy::App::exec: parser -> pipeline: compiler={}, "
+        "{} operation(s) [salign={}]\n",
+        parser->getName(),
+        Operations.size(),
+        alchemy::App::context().cliArgs.enableSalign);
+
     // execute full pipeline: parse → execute → transmute
     alchemy::core::Result<alchemy::pipeline::PipelineResult> pipelineResult =
         alchemy::pipeline::execute<alchemy::operation::RecipeOperation>(
-            *parser,
-            Operations,
-            alchemy::App::context().cliArgs.buildDir,
-            alchemy::App::context().cliArgs.enableDryRun);
+            *parser, Operations, alchemy::App::context().cliArgs.enableDryRun);
 
     if (pipelineResult.invalid())
     {
-      fmt::print(
+      alchemy::logger::error(
           "{}",
           alchemy::core::Error::format("alchemy::App::exec",
                                        "pipeline execution failed: {}",
@@ -152,18 +167,18 @@ alchemy::App::exec()
 
     // report transmutation summary
     const auto& summary = pipelineResult.value().summary;
-    fmt::print(
+    alchemy::logger::info(
         "alchemy::{}summary{}::{}{}{} recipes applied across {}{}{} files\n",
-        alchemy::color::ansi::BrightGreen,
+        alchemy::color::ansi::BoldBrightGreen,
         alchemy::color::ansi::Reset,
-        alchemy::color::ansi::Cyan,
+        alchemy::color::ansi::BrightGreen,
         summary.recipesApplied,
         alchemy::color::ansi::Reset,
-        alchemy::color::ansi::Cyan,
+        alchemy::color::ansi::BrightGreen,
         summary.filesProcessed,
         alchemy::color::ansi::Reset);
 
-    // report metrics (moved from pipeline layer for separation of concerns)
+    // report metrics
     if (!pipelineResult.value().allMetrics.empty())
     {
       alchemy::metrics::reporter::reportMetrics(
@@ -171,21 +186,33 @@ alchemy::App::exec()
     }
     else
     {
-      fmt::print(stdout,
-                 "alchemy::App::{}reporting{}::{}no metrics produced{}\n",
-                 alchemy::color::ansi::BrightGreen,
-                 alchemy::color::ansi::Reset,
-                 alchemy::color::ansi::Magenta,
-                 alchemy::color::ansi::Reset);
+      alchemy::logger::info(
+          "alchemy::App::{}reporting{}::{}no metrics produced{}\n",
+          alchemy::color::ansi::BoldBrightGreen,
+          alchemy::color::ansi::Reset,
+          alchemy::color::ansi::Magenta,
+          alchemy::color::ansi::Reset);
+    }
+
+    // warn about potential comment misalignment after non-dry-run mutations
+    if (summary.recipesApplied > 0 &&
+        !alchemy::App::context().cliArgs.enableDryRun)
+    {
+      alchemy::logger::warn(
+          "alchemy::{}warning{}::inline comments may have shifted "
+          "during field reordering and initializer lists may need updated\n\n",
+          alchemy::color::ansi::Magenta,
+          alchemy::color::ansi::Reset);
     }
 
     return EXIT_SUCCESS;
   }
   catch (const std::exception& e)
   {
-    fmt::print("{}",
-               alchemy::core::Error::format(
-                   "alchemy::App::exec", "caught exception: {}", e.what()));
+    alchemy::logger::error("{}",
+                           alchemy::core::Error::format("alchemy::App::exec",
+                                                        "caught exception: {}",
+                                                        e.what()));
     return EXIT_FAILURE;
   }
 }

@@ -54,21 +54,6 @@ TEST_F(ResultTypeTest, ErrorAccessThrowsOnSuccess)
   ASSERT_THROW(static_cast<void>(result.error()), std::bad_variant_access);
 }
 
-TEST_F(ResultTypeTest, TryValueReturnsOptional)
-{
-  auto successResult = alchemy::core::Result<std::string>::success("test");
-  auto failureResult = alchemy::core::Result<std::string>::failure("error");
-
-  auto successValue = successResult.tryValue();
-  auto failureValue = failureResult.tryValue();
-
-  ASSERT_TRUE(successValue.has_value());
-  ASSERT_EQ(successValue->get(),
-            "test");  // NOLINT(bugprone-unchecked-optional-access)
-
-  ASSERT_FALSE(failureValue.has_value());
-}
-
 TEST_F(ResultTypeTest, moveSemantics)
 {
   std::vector<std::string> largeData(1000, "item");

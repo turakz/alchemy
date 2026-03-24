@@ -2,8 +2,6 @@
 // unit tests for ClangParser
 
 // std
-#include <chrono>
-
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -28,11 +26,8 @@ protected:
   SetUp() override
   {
     // create temporary test directory with valid C file
-    tempDir = std::filesystem::temp_directory_path() /
-              "alchemy_clang_parser_test" /
-              std::to_string(
-                  std::chrono::steady_clock::now().time_since_epoch().count());
-    std::filesystem::create_directories(tempDir);
+    tempDir = alchemy::testing::utils::createTempTestDirectory(
+        "alchemy_clang_parser_unit_test");
 
     testSourceFile = utils::createTestFile(
         tempDir, "test.c", "struct TestStruct { int x; };");
@@ -60,7 +55,7 @@ TEST_F(ClangParserTest, CreateReturnsValidResultType)
 {
   const std::vector<std::filesystem::path> Sources = {testSourceFile};
 
-  auto result = alchemy::parser::ClangParser::create(Sources, tempDir);
+  auto result = alchemy::parser::ClangParser::create(Sources, tempDir, {});
 
   ASSERT_TRUE(result.valid()) << "alchemy::testing::unit::create should return "
                                  "valid Result with proper setup";
@@ -71,7 +66,7 @@ TEST_F(ClangParserTest, CreateFailsWithEmptySources)
 {
   const std::vector<std::filesystem::path> Sources = {};
 
-  auto result = alchemy::parser::ClangParser::create(Sources, {});
+  auto result = alchemy::parser::ClangParser::create(Sources, {}, {});
 
   ASSERT_TRUE(result.invalid())
       << "alchemy::testing::unit::create should fail with empty source list";
@@ -83,15 +78,15 @@ TEST_F(ClangParserTest, CreateFailsWithEmptySources)
 TEST_F(ClangParserTest, CreatedParserImplementsInterface)
 {
   const std::vector<std::filesystem::path> Sources = {testSourceFile};
-  auto result = alchemy::parser::ClangParser::create(Sources, tempDir);
+  auto result = alchemy::parser::ClangParser::create(Sources, tempDir, {});
   ASSERT_TRUE(result.valid());
 
-  auto parser = std::move(result.value());
+  auto parser = std::move(result).value();
   alchemy::parser::ParsingRuleAdapter* adapter = parser.get();
 
   ASSERT_NE(adapter, nullptr) << "alchemy::testing::unit::parser should be "
                                  "castable to ParsingRuleAdapter";
-  ASSERT_EQ(adapter->getName(), "GCC/Clang")
+  ASSERT_EQ(adapter->getName(), "Clang")
       << "alchemy::testing::unit::polymorphic getName() should work";
 }
 
@@ -99,7 +94,8 @@ TEST_F(ClangParserTest, CreatedParserImplementsInterface)
 TEST_F(ClangParserTest, ParseRespectsStructParsingFlag)
 {
   const std::vector<std::filesystem::path> Sources = {testSourceFile};
-  auto createResult = alchemy::parser::ClangParser::create(Sources, tempDir);
+  auto createResult =
+      alchemy::parser::ClangParser::create(Sources, tempDir, {});
   ASSERT_TRUE(createResult.valid());
 
   auto parser = std::move(createResult.value());
@@ -120,11 +116,8 @@ TEST_F(ClangParserTest, ParseRespectsStructParsingFlag)
 TEST_F(ClangParserTest, CreateHandlesMalformedCompilationDatabase)
 {
   // create directory with malformed compile_commands.json
-  auto malformedDir =
-      std::filesystem::temp_directory_path() / "alchemy_malformed_test" /
-      std::to_string(
-          std::chrono::steady_clock::now().time_since_epoch().count());
-  std::filesystem::create_directories(malformedDir);
+  auto malformedDir = alchemy::testing::utils::createTempTestDirectory(
+      "alchemy_malformed_test");
 
   // create source file
   auto sourceFile =
@@ -137,7 +130,7 @@ TEST_F(ClangParserTest, CreateHandlesMalformedCompilationDatabase)
   badJson.close();
 
   const std::vector<std::filesystem::path> Sources = {sourceFile};
-  auto result = alchemy::parser::ClangParser::create(Sources, malformedDir);
+  auto result = alchemy::parser::ClangParser::create(Sources, malformedDir, {});
 
   // With factory pattern, malformed database should now fail
   // (no more forgiving CommonOptionsParser fallback)
@@ -154,17 +147,14 @@ TEST_F(ClangParserTest, CreateHandlesMissingCompilationDatabase)
 {
   // create directory without compile_commands.json
   auto noDbDir =
-      std::filesystem::temp_directory_path() / "alchemy_no_db_test" /
-      std::to_string(
-          std::chrono::steady_clock::now().time_since_epoch().count());
-  std::filesystem::create_directories(noDbDir);
+      alchemy::testing::utils::createTempTestDirectory("alchemy_no_db_test");
 
   // create source file but no compilation database
   auto sourceFile =
       utils::createTestFile(noDbDir, "test.c", "struct Test { int x; };");
 
   const std::vector<std::filesystem::path> Sources = {sourceFile};
-  auto result = alchemy::parser::ClangParser::create(Sources, noDbDir);
+  auto result = alchemy::parser::ClangParser::create(Sources, noDbDir, {});
 
   // With factory pattern, missing database should now fail
   // (compilation database is required)
@@ -179,10 +169,11 @@ TEST_F(ClangParserTest, CreateHandlesMissingCompilationDatabase)
 TEST_F(ClangParserTest, ParseCanBeCalledMultipleTimes)
 {
   const std::vector<std::filesystem::path> Sources = {testSourceFile};
-  auto createResult = alchemy::parser::ClangParser::create(Sources, tempDir);
+  auto createResult =
+      alchemy::parser::ClangParser::create(Sources, tempDir, {});
   ASSERT_TRUE(createResult.valid());
 
-  auto parser = std::move(createResult.value());
+  auto parser = std::move(createResult).value();
 
   alchemy::parser::ParsingRequirements requirements;
   requirements.needsStructParsing = true;
@@ -221,7 +212,7 @@ TEST_F(ClangParserTest, CreateWithValidBuildDir)
                                             {testSourceFile.string()});
 
   const std::vector<std::filesystem::path> Sources = {testSourceFile};
-  auto result = alchemy::parser::ClangParser::create(Sources, buildDir);
+  auto result = alchemy::parser::ClangParser::create(Sources, buildDir, {});
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::create should succeed with valid build dir";
@@ -238,7 +229,7 @@ TEST_F(ClangParserTest, CreateWithoutCompilationDatabase)
   std::filesystem::create_directories(buildDir);
 
   const std::vector<std::filesystem::path> Sources = {testSourceFile};
-  auto result = alchemy::parser::ClangParser::create(Sources, buildDir);
+  auto result = alchemy::parser::ClangParser::create(Sources, buildDir, {});
 
   ASSERT_TRUE(result.invalid())
       << "alchemy::testing::unit::create should not succeed when build dir "

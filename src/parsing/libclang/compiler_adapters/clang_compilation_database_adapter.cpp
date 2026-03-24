@@ -1,4 +1,6 @@
 // src/parsing/libclang/compiler_adapters/clang_compilation_database_adapter.cpp
+#include "parsing/libclang/compiler_adapters/clang_compilation_database_adapter.hpp"
+
 // std
 #include <algorithm>
 #include <iterator>
@@ -12,7 +14,6 @@
 #include <llvm/ADT/StringRef.h>
 
 // local
-#include "parsing/libclang/compiler_adapters/clang_compilation_database_adapter.hpp"
 
 alchemy::parser::libclang::adapters::ClangCompilationDatabaseAdapter::
     ClangCompilationDatabaseAdapter(
@@ -50,8 +51,8 @@ alchemy::parser::libclang::adapters::ClangCompilationDatabaseAdapter::
 {
   std::vector<std::string> files;
   files.reserve(m_commandsByFile.size());
-  std::transform(m_commandsByFile.begin(),
-                 m_commandsByFile.end(),
+  std::transform(std::begin(m_commandsByFile),
+                 std::end(m_commandsByFile),
                  std::back_inserter(files),
                  [](const auto& pair) { return pair.first; });
   return files;

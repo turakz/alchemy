@@ -3,22 +3,21 @@
 
 // std
 #include <filesystem>
-#include <functional>
-#include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <variant>
 
 // 3rd party
-#include "fmt/core.h"
+#include <fmt/core.h>
 
 // local
 #include "app/color.hpp"
 
 namespace alchemy::core {
 
-namespace filesystem {
+namespace detail {
 struct TempFile {
   std::filesystem::path path;
   explicit TempFile(std::string_view prefix, std::string_view ext)
@@ -40,14 +39,14 @@ struct TempFile {
     if (ec)
     {
       fmt::print(stderr,
-                 "alchemy::core::filesystem::TempFile::~TempFile: "
+                 "alchemy::core::detail::TempFile::~TempFile: "
                  "failed to remove {}: {}\n",
                  path.string(),
                  ec.message());
     }
   }
 };
-};  // namespace filesystem
+}  // namespace detail
 
 struct Error {
 
@@ -59,7 +58,7 @@ struct Error {
   {
     return fmt::format("{}::{}error{}::{}",
                        context,
-                       alchemy::color::ansi::Magenta,
+                       alchemy::color::ansi::BoldMagenta,
                        alchemy::color::ansi::Reset,
                        fmt::format(fmt, std::forward<Args>(args)...)) +
            "\n";
@@ -144,18 +143,8 @@ public:
     return std::move(std::get<alchemy::core::Error>(m_data).message);
   }
 
-  [[nodiscard]] std::optional<std::reference_wrapper<const T>>
-  tryValue() const
-  {
-    if (valid())
-    {
-      return std::cref(std::get<T>(m_data));
-    }
-    return std::nullopt;
-  }
-
 private:
-  Result() : m_data(alchemy::core::Error("m_data::uninitialized"))
+  Result() : m_data(alchemy::core::Error(std::string{}))
   {
   }
   std::variant<T, alchemy::core::Error> m_data;

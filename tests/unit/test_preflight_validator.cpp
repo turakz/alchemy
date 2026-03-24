@@ -1,8 +1,6 @@
 // tests/unit/test_preflight_validator.cpp
 
 // std
-#include <chrono>
-
 #include <filesystem>
 #include <string>
 #include <unordered_map>
@@ -24,11 +22,8 @@ protected:
   SetUp() override
   {
     // create temp directory for tests
-    tempDir = std::filesystem::temp_directory_path() /
-              "alchemy_preflight_test" /
-              std::to_string(
-                  std::chrono::steady_clock::now().time_since_epoch().count());
-    std::filesystem::create_directories(tempDir);
+    tempDir = alchemy::testing::utils::createTempTestDirectory(
+        "alchemy_preflight_test");
   }
 
   void
@@ -53,7 +48,7 @@ TEST_F(PreflightValidatorTest, CheckIfFileExistsPassesForExistingFile)
 
   auto result =
       alchemy::pipeline::preflight_validator::detail::checkIfFileExists(
-          testFile);
+          testFile.string());
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::existing file should pass check";
@@ -65,7 +60,7 @@ TEST_F(PreflightValidatorTest, CheckIfFileExistsFailsForNonexistentFile)
 
   auto result =
       alchemy::pipeline::preflight_validator::detail::checkIfFileExists(
-          nonexistentFile);
+          nonexistentFile.string());
 
   ASSERT_TRUE(result.invalid())
       << "alchemy::testing::unit::nonexistent file should fail check";
@@ -84,7 +79,7 @@ TEST_F(PreflightValidatorTest, CheckIsRegularFilePassesForRegularFile)
 
   auto result =
       alchemy::pipeline::preflight_validator::detail::checkIsRegularFile(
-          testFile);
+          testFile.string());
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::regular file should pass check";
@@ -97,7 +92,7 @@ TEST_F(PreflightValidatorTest, CheckIsRegularFileFailsForDirectory)
 
   auto result =
       alchemy::pipeline::preflight_validator::detail::checkIsRegularFile(
-          directory);
+          directory.string());
 
   ASSERT_TRUE(result.invalid())
       << "alchemy::testing::unit::directory should fail regular file check";
@@ -116,7 +111,7 @@ TEST_F(PreflightValidatorTest, CheckIsFileWritablePassesForWritableFile)
 
   auto result =
       alchemy::pipeline::preflight_validator::detail::checkIsFileWritable(
-          testFile);
+          testFile.string());
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::writable file should pass check";
@@ -135,7 +130,7 @@ TEST_F(PreflightValidatorTest, CheckIsFileWritableFailsForReadOnlyFile)
 
   auto result =
       alchemy::pipeline::preflight_validator::detail::checkIsFileWritable(
-          testFile);
+          testFile.string());
 
   ASSERT_TRUE(result.invalid())
       << "alchemy::testing::unit::read-only file should fail writable check";
@@ -158,7 +153,7 @@ TEST_F(PreflightValidatorTest, CheckIsParentDirWritablePassesForWritableParent)
 
   auto result =
       alchemy::pipeline::preflight_validator::detail::checkIsParentDirWritable(
-          testFile);
+          testFile.string());
 
   ASSERT_TRUE(result.valid()) << "alchemy::testing::unit::file in writable "
                                  "directory should pass check";
@@ -183,7 +178,7 @@ TEST_F(PreflightValidatorTest, CheckIsParentDirWritableFailsForReadOnlyParent)
 
   auto result =
       alchemy::pipeline::preflight_validator::detail::checkIsParentDirWritable(
-          testFile);
+          testFile.string());
 
   ASSERT_TRUE(result.invalid())
       << "alchemy::testing::unit::file in read-only directory should fail "
@@ -206,8 +201,8 @@ TEST_F(PreflightValidatorTest, CheckIfCanApplyRecipePassesForValidFile)
 {
   auto testFile = utils::createTestFile(tempDir, "valid.txt", "content");
 
-  auto result =
-      alchemy::pipeline::preflight_validator::checkIfCanApplyRecipe(testFile);
+  auto result = alchemy::pipeline::preflight_validator::checkIfCanApplyRecipe(
+      testFile.string());
 
   ASSERT_TRUE(result.valid())
       << "alchemy::testing::unit::valid file should pass all checks";
@@ -218,7 +213,7 @@ TEST_F(PreflightValidatorTest, CheckIfCanApplyRecipeFailsIfFileDoesNotExist)
   auto nonexistentFile = tempDir / "missing.txt";
 
   auto result = alchemy::pipeline::preflight_validator::checkIfCanApplyRecipe(
-      nonexistentFile);
+      nonexistentFile.string());
 
   ASSERT_TRUE(result.invalid())
       << "alchemy::testing::unit::should fail if file doesn't exist";
@@ -229,8 +224,8 @@ TEST_F(PreflightValidatorTest, CheckIfCanApplyRecipeFailsIfNotRegularFile)
   auto directory = tempDir / "notfile";
   std::filesystem::create_directory(directory);
 
-  auto result =
-      alchemy::pipeline::preflight_validator::checkIfCanApplyRecipe(directory);
+  auto result = alchemy::pipeline::preflight_validator::checkIfCanApplyRecipe(
+      directory.string());
 
   ASSERT_TRUE(result.invalid())
       << "alchemy::testing::unit::should fail if not regular file";
@@ -244,8 +239,8 @@ TEST_F(PreflightValidatorTest, CheckIfCanApplyRecipeFailsIfFileNotWritable)
                                std::filesystem::perms::owner_read,
                                std::filesystem::perm_options::replace);
 
-  auto result =
-      alchemy::pipeline::preflight_validator::checkIfCanApplyRecipe(testFile);
+  auto result = alchemy::pipeline::preflight_validator::checkIfCanApplyRecipe(
+      testFile.string());
 
   ASSERT_TRUE(result.invalid())
       << "alchemy::testing::unit::should fail if file not writable";
@@ -269,8 +264,8 @@ TEST_F(PreflightValidatorTest, CheckIfCanApplyRecipeFailsIfParentDirNotWritable)
                                    std::filesystem::perms::owner_exec,
                                std::filesystem::perm_options::replace);
 
-  auto result =
-      alchemy::pipeline::preflight_validator::checkIfCanApplyRecipe(testFile);
+  auto result = alchemy::pipeline::preflight_validator::checkIfCanApplyRecipe(
+      testFile.string());
 
   ASSERT_TRUE(result.invalid())
       << "alchemy::testing::unit::should fail if parent directory not "
@@ -292,12 +287,11 @@ TEST_F(PreflightValidatorTest, CheckIfCanApplyRecipesPassesForAllValidFiles)
   auto file2 = utils::createTestFile(tempDir, "file2.txt", "content2");
   auto file3 = utils::createTestFile(tempDir, "file3.txt", "content3");
 
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipes;
-  recipes[file1] = {};
-  recipes[file2] = {};
-  recipes[file3] = {};
+  recipes[file1.string()] = {};
+  recipes[file2.string()] = {};
+  recipes[file3.string()] = {};
 
   auto result =
       alchemy::pipeline::preflight_validator::checkIfCanApplyRecipes(recipes);
@@ -312,12 +306,11 @@ TEST_F(PreflightValidatorTest, CheckIfCanApplyRecipesFailsIfAnyFileInvalid)
   auto invalidFile = tempDir / "nonexistent.txt";  // doesn't exist
   auto validFile2 = utils::createTestFile(tempDir, "valid2.txt", "content");
 
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipes;
-  recipes[validFile1] = {};
-  recipes[invalidFile] = {};  // this one will fail
-  recipes[validFile2] = {};
+  recipes[validFile1.string()] = {};
+  recipes[invalidFile.string()] = {};  // this one will fail
+  recipes[validFile2.string()] = {};
 
   auto result =
       alchemy::pipeline::preflight_validator::checkIfCanApplyRecipes(recipes);
@@ -328,7 +321,7 @@ TEST_F(PreflightValidatorTest, CheckIfCanApplyRecipesFailsIfAnyFileInvalid)
 
 TEST_F(PreflightValidatorTest, CheckIfCanApplyRecipesPassesForEmptyMap)
 {
-  const std::unordered_map<std::filesystem::path,
+  const std::unordered_map<std::string,
                            std::vector<alchemy::operation::Recipe>>
       Recipes;  // empty
 

@@ -2,8 +2,6 @@
 
 // std
 #include <algorithm>
-#include <chrono>
-
 #include <filesystem>
 #include <string>
 #include <type_traits>
@@ -27,10 +25,8 @@ protected:
   SetUp() override
   {
     // create temp directory for tests
-    tempDir = std::filesystem::temp_directory_path() / "alchemy_app_test" /
-              std::to_string(
-                  std::chrono::steady_clock::now().time_since_epoch().count());
-    std::filesystem::create_directories(tempDir);
+    tempDir =
+        alchemy::testing::utils::createTempTestDirectory("alchemy_app_test");
   }
 
   void
@@ -55,7 +51,8 @@ TEST_F(AppTest, CreateSucceedsWithValidSingleSourceFile)
   auto testFile = utils::createTestFile(tempDir, "test.c", "// test");
 
   auto options = utils::createMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir / "output",
                            .sourceFiles = {testFile.string()},
                            .excludePatterns = {},
@@ -75,7 +72,8 @@ TEST_F(AppTest, CreateSucceedsWithMultipleSourceFiles)
   auto file2 = utils::createTestFile(tempDir, "file2.c", "// file2");
 
   auto options = utils::createMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir / "output",
                            .sourceFiles = {file1.string(), file2.string()},
                            .excludePatterns = {},
@@ -88,9 +86,11 @@ TEST_F(AppTest, CreateSucceedsWithMultipleSourceFiles)
   ASSERT_EQ(result.value().context().inventory.sourceFiles.size(), 2);
   // verify actual file paths are present (order may vary)
   const auto& files = result.value().context().inventory.sourceFiles;
-  ASSERT_TRUE(std::find(files.begin(), files.end(), file1) != files.end())
+  ASSERT_TRUE(std::find(std::begin(files), std::end(files), file1) !=
+              std::end(files))
       << "should contain file1";
-  ASSERT_TRUE(std::find(files.begin(), files.end(), file2) != files.end())
+  ASSERT_TRUE(std::find(std::begin(files), std::end(files), file2) !=
+              std::end(files))
       << "should contain file2";
 }
 
@@ -104,7 +104,8 @@ TEST_F(AppTest, CreateSucceedsWithGlobPattern)
   auto globPattern = (tempDir / "*.c").string();
 
   auto options = utils::createMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir / "output",
                            .sourceFiles = {globPattern},
                            .excludePatterns = {},
@@ -134,7 +135,8 @@ TEST_F(AppTest, CreateSucceedsWithNoMatchingFiles)
   auto invalidGlob = (tempDir / "*.nonexistent").string();
 
   auto options = utils::createMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir / "output",
                            .sourceFiles = {invalidGlob},
                            .excludePatterns = {},
@@ -153,7 +155,8 @@ TEST_F(AppTest, CreateHandlesExcludePatterns)
   auto exclude1 = utils::createTestFile(tempDir, "exclude.c", "// exclude");
 
   auto options = utils::createMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir / "output",
                            .sourceFiles = {(tempDir / "*.c").string()},
                            .excludePatterns = {exclude1.string()},
@@ -178,7 +181,8 @@ TEST_F(AppTest, CreateHandlesMultipleJobs)
   }
 
   auto options = utils::createMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir / "output",
                            .sourceFiles = {(tempDir / "*.c").string()},
                            .excludePatterns = {},
@@ -202,7 +206,8 @@ TEST_F(AppTest, CreateRecipeOperationsCreatesSalignOperation)
 
   auto testFile = utils::createTestFile(tempDir, "test.c", "// test");
   auto options = utils::createMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = {},
                            .sourceFiles = {testFile.string()},
                            .excludePatterns = {},
@@ -239,7 +244,8 @@ TEST_F(AppTest, CreateRecipeOperationsCreatesSingleOperation)
 
   auto testFile = utils::createTestFile(tempDir, "test.c", "// test");
   auto options = utils::createMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = {},
                            .sourceFiles = {testFile.string()},
                            .excludePatterns = {},
@@ -263,7 +269,8 @@ TEST_F(AppTest, CreateRecipeOperationsReturnsEmptyWhenConfigHasNoFeatures)
   auto buildDir = utils::createTestFile(
       tempDir / "build", "compile_commands.json", "// test");
   auto options = utils::createMockOptions(
-      utils::MockCliConfig{.buildDir = buildDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = buildDir,
                            .outputDir = {},
                            .sourceFiles = {testFile.string()},
                            .excludePatterns = {},
@@ -281,7 +288,8 @@ TEST_F(AppTest, CreateFailsWithNonexistentBuildDir)
 {
   auto testFile = utils::createTestFile(tempDir, "test.c", "// test");
   auto options = utils::createMockOptions(
-      utils::MockCliConfig{.buildDir = "/nonexistent/path",
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = "/nonexistent/path",
                            .outputDir = {},
                            .sourceFiles = {testFile.string()},
                            .excludePatterns = {},

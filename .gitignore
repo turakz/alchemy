@@ -1,0 +1,91 @@
+# ========================
+# CMake / build directories
+# ========================
+/build/
+CMakeUserPresets.json
+/CMakeFiles/
+/CMakeCache.txt
+/CMakeScripts/
+/*.cmake
+/compile_commands.json
+/*.dir
+/*.obj
+/*.o
+/*.exe
+/*.dll
+/*.lib
+/*.so
+/*.dylib
+
+# ========================
+# IDE / Editor files
+# ========================
+# Visual Studio
+*.VC.db
+*.VC.opendb
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# CLion
+.idea/
+/*.iml
+cmake-build-*/
+
+# Vim / Neovim
+*.swp
+*.swo
+*.un~
+*.vimrc
+
+# Emacs
+*~
+\#*\#
+\.#*
+
+# ========================
+# OS-specific
+# ========================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.nfs*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ========================
+# Docker
+# ========================
+.docker.env
+
+# ========================
+# Misc / temporary
+# ========================
+*.log
+*.tmp
+*.bak
+*.old
+.cache/
+*.out
+
+gtoken.txt
+scratch/
+
+# ========================
+# Coverage artifacts
+# ========================
+*.gcda
+*.gcno
+*.gcov
+coverage.info
+coverage_filtered.info
+coverage_html/

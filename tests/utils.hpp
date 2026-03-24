@@ -14,6 +14,11 @@
 
 namespace alchemy::testing::utils {
 
+// create a unique temp directory for tests, with an optional timestamp
+// uniquifier to avoid collisions between parallel test runs
+std::filesystem::path
+createTempTestDirectory(const std::string& testName, bool uniquify = true);
+
 // file creation utilities
 
 // create a test file with given content in specified directory
@@ -36,7 +41,7 @@ createSyntheticCompilationDatabase(
 
 // create a realistic GCC compilation database with absolute paths
 void
-createGCCDatabase(const std::filesystem::path& buildDir,
+createGccDatabase(const std::filesystem::path& buildDir,
                   const std::filesystem::path& projectRoot);
 
 // create a realistic Clang compilation database with absolute paths
@@ -46,12 +51,12 @@ createClangDatabase(const std::filesystem::path& buildDir,
 
 // create a realistic IAR compilation database with absolute paths
 void
-createIARDatabase(const std::filesystem::path& buildDir,
+createIarDatabase(const std::filesystem::path& buildDir,
                   const std::filesystem::path& projectRoot);
 
 // create a realistic MSVC compilation database with absolute paths
 void
-createMSVCDatabase(const std::filesystem::path& buildDir,
+createMsvcDatabase(const std::filesystem::path& buildDir,
                    const std::filesystem::path& projectRoot);
 
 // copy directory recursively
@@ -111,6 +116,7 @@ createFieldDef(unsigned byteOffset,
 // mock build configuration for testing (avoids LLVM global state, easier to
 // extend)
 struct MockCliConfig {
+  std::filesystem::path rootDir;
   std::filesystem::path buildDir;
   std::filesystem::path outputDir;
   std::vector<std::string> sourceFiles = {};

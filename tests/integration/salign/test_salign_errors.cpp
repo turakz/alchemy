@@ -30,7 +30,8 @@ struct BadStruct {
   std::string headerPath = (tempDir / "bad_syntax.h").string();
   utils::createSyntheticCompilationDatabase(tempDir, {headerPath});
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {headerPath},
                            .excludePatterns = {},
@@ -42,12 +43,15 @@ struct BadStruct {
          "malformed";
 
   const int ExitCode = appResult.value().exec();
-  ASSERT_EQ(ExitCode, 1)
-      << "alchemy::testing::integration::malformed source "
-         "should be handled gracefully - app doesn't crash but returns error";
+  // soft-skip: malformed source is skipped with a warning rather than a
+  // hard failure — clang parse errors are treated as non-fatal so alchemy
+  // can continue processing any remaining files. exit 0 is expected.
+  ASSERT_EQ(ExitCode, 0)
+      << "alchemy::testing::integration::malformed source should be "
+         "soft-skipped with a warning — app exits 0, no mutations applied";
 
-  // verify integration: error propagation through parser→orchestrator→app
-  // file should remain unchanged when parsing encounters errors
+  // verify integration: file must be unchanged (no recipes generated for
+  // a file that failed to parse)
   auto fileContent = utils::readFile(tempDir / "bad_syntax.h");
   ASSERT_EQ(fileContent, BadCode)
       << "alchemy::testing::integration::file should be unchanged on parse "
@@ -69,7 +73,8 @@ struct BadStruct {
   std::string headerPath = (tempDir / "bad_syntax.hpp").string();
   utils::createSyntheticCompilationDatabase(tempDir, {headerPath});
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {headerPath},
                            .excludePatterns = {},
@@ -81,12 +86,15 @@ struct BadStruct {
          "malformed";
 
   const int ExitCode = appResult.value().exec();
-  ASSERT_EQ(ExitCode, 1)
-      << "alchemy::testing::integration::malformed source "
-         "should be handled gracefully - app doesn't crash but returns error";
+  // soft-skip: malformed source is skipped with a warning rather than a
+  // hard failure — clang parse errors are treated as non-fatal so alchemy
+  // can continue processing any remaining files. exit 0 is expected.
+  ASSERT_EQ(ExitCode, 0)
+      << "alchemy::testing::integration::malformed source should be "
+         "soft-skipped with a warning — app exits 0, no mutations applied";
 
-  // verify integration: error propagation through parser→orchestrator→app
-  // file should remain unchanged when parsing encounters errors
+  // verify integration: file must be unchanged (no recipes generated for
+  // a file that failed to parse)
   auto fileContent = utils::readFile(tempDir / "bad_syntax.hpp");
   ASSERT_EQ(fileContent, BadCode)
       << "alchemy::testing::integration::file should be unchanged on parse "
@@ -126,7 +134,8 @@ struct UnoptimizedStruct {
                                std::filesystem::perm_options::replace);
 
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {headerPath},
                            .excludePatterns = {},
@@ -205,6 +214,7 @@ struct UnoptimizedStruct {
                                std::filesystem::perm_options::replace);
 
   auto appResult = utils::createAlchemyWithMockOptions(utils::MockCliConfig{
+      .rootDir = tempDir,
       .buildDir = tempDir,
       .outputDir = tempDir,
       .sourceFiles = {headerPath1, headerPath2, headerPath3},
@@ -284,6 +294,7 @@ struct UnoptimizedStruct {
       tempDir, {headerPath1, headerPath2, headerPath3});
 
   auto appResult = utils::createAlchemyWithMockOptions(utils::MockCliConfig{
+      .rootDir = tempDir,
       .buildDir = tempDir,
       .outputDir = tempDir,
       .sourceFiles = {headerPath1, headerPath2, headerPath3},
@@ -344,6 +355,7 @@ struct TestStruct {
   std::filesystem::create_directories(buildDir);
 
   auto appResult = utils::createAlchemyWithMockOptions(utils::MockCliConfig{
+      .rootDir = tempDir,
       .buildDir = buildDir,  // build dir without compile_commands.json
       .outputDir = tempDir,
       .sourceFiles = {sourceFile.string()},
@@ -380,6 +392,7 @@ struct TestStruct {
   utils::createSyntheticCompilationDatabase(buildDir, {sourceFile.string()});
 
   auto appResult = utils::createAlchemyWithMockOptions(utils::MockCliConfig{
+      .rootDir = tempDir,
       .buildDir = buildDir,  // valid build dir with compile_commands.json
       .outputDir = tempDir,
       .sourceFiles = {sourceFile.string()},

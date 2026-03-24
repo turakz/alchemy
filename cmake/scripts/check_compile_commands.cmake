@@ -2,7 +2,7 @@
 # Helper script to check if compile_commands.json exists
 # Usage: cmake -P cmake/scripts/check_compile_commands.cmake
 
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.21)
 
 # Get project root
 if(NOT DEFINED SOURCE_DIR)
@@ -12,7 +12,11 @@ endif()
 # Check for compile_commands.json in multiple locations
 set(COMPILE_COMMANDS_FOUND FALSE)
 set(COMPILE_COMMANDS_LOCATIONS
-  "${SOURCE_DIR}/build/compile_commands.json"
+  "${SOURCE_DIR}/compile_commands.json"
+  "${SOURCE_DIR}/build/debug/compile_commands.json"
+  "${SOURCE_DIR}/build/release/compile_commands.json"
+  "${SOURCE_DIR}/build/coverage/compile_commands.json"
+  "${SOURCE_DIR}/build/sanitizers/compile_commands.json"
 )
 
 foreach(LOCATION ${COMPILE_COMMANDS_LOCATIONS})

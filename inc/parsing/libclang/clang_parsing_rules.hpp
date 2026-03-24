@@ -4,23 +4,17 @@
 
 // std
 #include <string>
-#include <vector>
 
 // 3rd party
-#include "clang/ASTMatchers/ASTMatchFinder.h"
-
-// local
+#include <clang/ASTMatchers/ASTMatchFinder.h>
 
 namespace alchemy::parser {
 
-// base class for clang AST matcher rules
 // provides interface for registering matchers and handling AST callbacks
 class ClangParsingMatcher
   : public clang::ast_matchers::MatchFinder::MatchCallback {
 public:
   ~ClangParsingMatcher() override = default;
-
-  // polymorphic base class - delete copy, allow move
   ClangParsingMatcher() = default;
   ClangParsingMatcher(const ClangParsingMatcher&) = delete;
   ClangParsingMatcher&
@@ -40,8 +34,6 @@ public:
   // metadata
   virtual std::string
   getName() const = 0;
-  virtual std::vector<std::string>
-  getSupportedExtensions() const = 0;
 };
 
 }  // namespace alchemy::parser

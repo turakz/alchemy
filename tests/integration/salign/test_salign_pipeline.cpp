@@ -43,7 +43,8 @@ struct UnoptimizedStruct {
   utils::createSyntheticCompilationDatabase(tempDir, {headerPath});
 
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {headerPath},
                            .excludePatterns = {},
@@ -119,7 +120,8 @@ struct UnoptimizedStruct {
   utils::createSyntheticCompilationDatabase(tempDir, {headerPath});
 
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {headerPath},
                            .excludePatterns = {},
@@ -199,7 +201,8 @@ struct AlreadyOptimal {
   std::string headerPath = (tempDir / "multi_struct.h").string();
   utils::createSyntheticCompilationDatabase(tempDir, {headerPath});
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {headerPath},
                            .excludePatterns = {},
@@ -275,7 +278,8 @@ struct FileTwoStruct {
   utils::createSyntheticCompilationDatabase(tempDir, {header1, header2});
 
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {header1, header2},
                            .excludePatterns = {},
@@ -339,7 +343,8 @@ TEST_F(SalignIntegrationTest, ProcessesCHeaderGlobPattern)
 
   std::string globPattern = (tempDir / "*.h").string();
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {globPattern},
                            .excludePatterns = {},
@@ -390,7 +395,8 @@ TEST_F(SalignIntegrationTest, ProcessesCXXHeaderGlobPattern)
 
   std::string globPattern = (tempDir / "*.hpp").string();
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {globPattern},
                            .excludePatterns = {},
@@ -446,7 +452,8 @@ void someFunction() {
   std::string headerPath = (tempDir / "no_structs.h").string();
   utils::createSyntheticCompilationDatabase(tempDir, {headerPath});
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {headerPath},
                            .excludePatterns = {},
@@ -474,7 +481,8 @@ TEST_F(SalignIntegrationTest, HandlesMissingFile)
   utils::createSyntheticCompilationDatabase(tempDir);
   std::string nonexistentPath = (tempDir / "does_not_exist.h").string();
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {nonexistentPath},
                            .excludePatterns = {},
@@ -509,7 +517,8 @@ void someFunction() {
   std::string headerPath = (tempDir / "mixed_content.h").string();
   utils::createSyntheticCompilationDatabase(tempDir, {headerPath});
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {headerPath},
                            .excludePatterns = {},
@@ -569,7 +578,8 @@ struct UnoptimizedStruct {
 
   // run salign with explicit build directory
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = buildDir,  // explicit build dir
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = buildDir,  // explicit build dir
                            .outputDir = tempDir,
                            .sourceFiles = {headerPath},
                            .excludePatterns = {},

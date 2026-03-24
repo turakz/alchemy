@@ -1,34 +1,53 @@
 // src/operation/refactoring/salign_operation.cpp
+#include "operation/refactoring/salign_operation.hpp"
+
 // std
 #include <cmath>
 #include <cstddef>
 
 #include <algorithm>
 #include <iterator>
+#include <numeric>
+#include <string>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-// 3rd party
 
 // local
 #include "app/core/core.hpp"
 #include "metrics/metrics.hpp"
 #include "metrics/salign_metrics.hpp"
 #include "operation/operation_base.hpp"
-#include "operation/refactoring/salign_operation.hpp"
 #include "parsing/artifacts/artifacts.hpp"
 
-double
-alchemy::operation::refactoring::StructAlignmentOperation::calculatePercentage(
-    std::size_t numerator, std::size_t denominator) const
+namespace alchemy::operation::refactoring::detail {
+
+// build source-faithful replacement text for a reordered field
+std::string
+buildReplacementText(const alchemy::parser::artifacts::FieldDef& field)
 {
-  return (denominator > 0) ? (static_cast<double>(numerator) /
-                              static_cast<double>(denominator)) *
-                                 100.0
-                           : 0.0;
+  std::string text;
+
+  // prepend preceding comment if present (travels with the field)
+  if (!field.precedingComment.empty())
+  {
+    text = field.precedingComment + field.commentFieldGap;
+  }
+
+  // field declaration (use source-faithful array suffix to preserve macros)
+  text += field.sourceTypeName + " " + field.fieldName +
+          field.sourceArraySuffix + ";";
+
+  if (!field.trailingComment.empty())
+  {
+    text += " " + field.trailingComment;
+  }
+
+  return text;
 }
+
+}  // namespace alchemy::operation::refactoring::detail
 
 // helper: compute cache line metrics for a given struct size
 alchemy::operation::refactoring::StructAlignmentOperation::CacheMetrics
@@ -37,93 +56,102 @@ alchemy::operation::refactoring::StructAlignmentOperation::computeCacheMetrics(
 {
   alchemy::operation::refactoring::StructAlignmentOperation::CacheMetrics
       metrics{};
-  metrics.spclScore = std::floor(64.0 / static_cast<double>(structSize));
-  const std::size_t BytesUsed =
-      static_cast<std::size_t>(metrics.spclScore) * structSize;
-  metrics.cacheWaste = 64 - BytesUsed;
-  metrics.cacheUtil = (static_cast<double>(BytesUsed) / 64.0) * 100.0;
+  const double Spcl = std::floor(static_cast<double>(CacheLineBytes) /
+                                 static_cast<double>(structSize));
+  const std::size_t BytesUsed = static_cast<std::size_t>(Spcl) * structSize;
+  metrics.cacheWaste = CacheLineBytes - BytesUsed;
+  metrics.cacheUtil =
+      (static_cast<double>(BytesUsed) / static_cast<double>(CacheLineBytes)) *
+      100.0;
   return metrics;
 }
 
-std::vector<alchemy::parser::artifacts::FieldDef>
+std::vector<std::size_t>
 alchemy::operation::refactoring::StructAlignmentOperation::
     sortFieldsByAlignment(
         const std::vector<alchemy::parser::artifacts::FieldDef>& fields) const
 {
-  std::vector<alchemy::parser::artifacts::FieldDef> sorted = fields;
-  std::sort(std::begin(sorted),
-            std::end(sorted),
-            [](const alchemy::parser::artifacts::FieldDef& lhs,
-               const alchemy::parser::artifacts::FieldDef& rhs) {
-              // partition: reorderable fields first (sorted by alignment desc),
-              // then non-reorderable (preserve order) note: bitfields and other
-              // constraints will be revisited when we better understand
-              // optimization rules
-              return std::tie(lhs.canReorder, lhs.naturalAlignment) >
-                     std::tie(rhs.canReorder, rhs.naturalAlignment);
-            });
-  return sorted;
+  std::vector<std::size_t> indices(fields.size());
+  std::iota(std::begin(indices), std::end(indices), std::size_t{0});
+  std::stable_sort(
+      std::begin(indices),
+      std::end(indices),
+      [&fields](std::size_t lhs, std::size_t rhs) {
+        // partition: reorderable fields first (sorted by alignment
+        // desc), then non-reorderable (preserve order) stable_sort
+        // preserves original field order within same-alignment
+        // groups, avoiding pointless churn when fields share a type
+        return std::tie(fields[lhs].canReorder, fields[lhs].naturalAlignment) >
+               std::tie(fields[rhs].canReorder, fields[rhs].naturalAlignment);
+      });
+  return indices;
 }
 
-alchemy::operation::refactoring::StructAnalysis
+alchemy::operation::refactoring::StructOptimization
 alchemy::operation::refactoring::StructAlignmentOperation::analyzeStruct(
     const alchemy::parser::artifacts::StructDef& structDef) const
 {
   // phase 1: layout, waste, cache metrics
   // ---
-  alchemy::operation::refactoring::StructAnalysis analyzedStruct;
+  alchemy::operation::refactoring::StructOptimization optimization;
 
   // init metrics from current (parsed) layout
-  analyzedStruct.metrics.structName = structDef.structName;
-  analyzedStruct.metrics.sourceFile = structDef.sourceFile;
-  analyzedStruct.metrics.naturalTotalSize = structDef.naturalTotalSize;
-  analyzedStruct.metrics.currentDataSize = structDef.currentDataSize;
-  analyzedStruct.metrics.naturalAlignment = structDef.naturalAlignment;
-  analyzedStruct.metrics.currentWastedBytes = structDef.currentWastedBytes;
+  optimization.metrics.structName = structDef.structName;
+  optimization.metrics.sourceFile = structDef.sourceFile;
+  optimization.metrics.naturalTotalSize = structDef.naturalTotalSize;
+  optimization.metrics.currentDataSize = structDef.currentDataSize;
+  optimization.metrics.naturalAlignment = structDef.naturalAlignment;
+  optimization.metrics.currentWastedBytes = structDef.currentWastedBytes;
 
   // compute waste
-  analyzedStruct.metrics.currentWastePercent =
-      alchemy::operation::refactoring::StructAlignmentOperation::
-          calculatePercentage(analyzedStruct.metrics.currentWastedBytes,
-                              analyzedStruct.metrics.naturalTotalSize);
+  optimization.metrics.currentWastePercent =
+      alchemy::metrics::calculatePercentage(
+          optimization.metrics.currentWastedBytes,
+          optimization.metrics.naturalTotalSize);
 
   // compute cache metrics
   auto currentCache = alchemy::operation::refactoring::
       StructAlignmentOperation::computeCacheMetrics(structDef.naturalTotalSize);
-  analyzedStruct.metrics.currentSpclScore = currentCache.spclScore;
-  analyzedStruct.metrics.currentCacheWaste = currentCache.cacheWaste;
-  analyzedStruct.metrics.currentCacheUtil = currentCache.cacheUtil;
+  optimization.metrics.currentCacheWaste = currentCache.cacheWaste;
+  optimization.metrics.currentCacheUtil = currentCache.cacheUtil;
+
+  // skip #pragma pack structs — field order defines binary layout,
+  // and pack(N) already eliminates or constrains padding so reordering
+  // provides zero size benefit
+  if (structDef.isPacked)
+  {
+    optimization.metrics.skipped = true;
+    return optimization;
+  }
 
   // phase 2: optimal layout
   // ---
 
   // compute optimized size
-  auto optimizedFields = alchemy::operation::refactoring::
-      StructAlignmentOperation::sortFieldsByAlignment(structDef.fields);
+  auto sortedOrder = alchemy::operation::refactoring::StructAlignmentOperation::
+      sortFieldsByAlignment(structDef.fields);
 
   const std::size_t OptimizedSize =
       alchemy::parser::artifacts::StructDef::computeSize(
-          optimizedFields, structDef.naturalAlignment);
+          structDef.fields, sortedOrder, structDef.naturalAlignment);
 
-  // compute optimized waste
+  // compute optimized waste (order-independent sum)
   const std::size_t OptimizedDataSize =
-      alchemy::parser::artifacts::StructDef::computeDataSize(optimizedFields);
+      alchemy::parser::artifacts::StructDef::computeDataSize(structDef.fields);
 
   const std::size_t OptimizedWaste = OptimizedSize - OptimizedDataSize;
 
   // compute optimized metrics
-  analyzedStruct.metrics.optimizedSize = OptimizedSize;
-  analyzedStruct.metrics.optimizedWaste = OptimizedWaste;
-  analyzedStruct.metrics.optimizedWastePercent =
-      alchemy::operation::refactoring::StructAlignmentOperation::
-          calculatePercentage(OptimizedWaste, OptimizedSize);
+  optimization.metrics.optimizedSize = OptimizedSize;
+  optimization.metrics.optimizedWaste = OptimizedWaste;
+  optimization.metrics.optimizedWastePercent =
+      alchemy::metrics::calculatePercentage(OptimizedWaste, OptimizedSize);
 
   // compute optimized cache metrics
   auto optimizedCacheMetrics = alchemy::operation::refactoring::
       StructAlignmentOperation::computeCacheMetrics(OptimizedSize);
-  analyzedStruct.metrics.optimizedSpclScore = optimizedCacheMetrics.spclScore;
-  analyzedStruct.metrics.optimizedCacheWaste = optimizedCacheMetrics.cacheWaste;
-  analyzedStruct.metrics.optimizedCacheUtil = optimizedCacheMetrics.cacheUtil;
+  optimization.metrics.optimizedCacheWaste = optimizedCacheMetrics.cacheWaste;
+  optimization.metrics.optimizedCacheUtil = optimizedCacheMetrics.cacheUtil;
 
   // phase 3: check if struct would benefit from being refactored (or if it's
   // sorted already)
@@ -132,51 +160,62 @@ alchemy::operation::refactoring::StructAlignmentOperation::analyzeStruct(
   if (OptimizedSize < structDef.naturalTotalSize)
   {
     // compute savings
-    analyzedStruct.metrics.possibleSavings =
+    optimization.metrics.possibleSavings =
         structDef.naturalTotalSize - OptimizedSize;
-    analyzedStruct.metrics.savingsPercent = alchemy::operation::refactoring::
-        StructAlignmentOperation::calculatePercentage(
-            analyzedStruct.metrics.possibleSavings, structDef.naturalTotalSize);
+    optimization.metrics.savingsPercent = alchemy::metrics::calculatePercentage(
+        optimization.metrics.possibleSavings, structDef.naturalTotalSize);
     // generate refactoring recipes
-    for (std::size_t idx = 0; idx < optimizedFields.size(); ++idx)
+    for (std::size_t idx = 0; idx < sortedOrder.size(); ++idx)
     {
       const auto& originalField = structDef.fields[idx];
-      const auto& optimizedField = optimizedFields[idx];
+      const auto& optimizedField = structDef.fields[sortedOrder[idx]];
 
       // only generate recipes for fields that would be swapped
       if (originalField.fieldName != optimizedField.fieldName)
       {
-        // create replacement string
-        const std::string ReplacementTxt =
-            optimizedField.typeName + " " + optimizedField.fieldName + ";";
+        // skip if either field is non-reorderable
+        // -> the optimized field's typeName may be
+        // unrepresentable as valid C source (e.g., clang
+        // emits "(unnamed union at path:line:col)" for anonymous unions)
+        if (!originalField.canReorder || !optimizedField.canReorder)
+        {
+          // struct contains non-reorderable fields in the swap zone
+          // bail out entirely to avoid corrupting the source file
+          optimization.recipes.clear();
+          optimization.metrics.possibleSavings = 0;
+          optimization.metrics.savingsPercent = 0.0;
+          break;
+        }
 
         // create recipe
-        alchemy::operation::detail::RefactorRecipe recipe;
+        alchemy::operation::RefactorRecipe recipe;
         recipe.sourceFile = structDef.sourceFile;
         recipe.byteOffset = originalField.byteOffset;
         recipe.byteLength = originalField.byteLength;
-        recipe.replacementText = ReplacementTxt;
+        recipe.replacementText =
+            alchemy::operation::refactoring::detail::buildReplacementText(
+                optimizedField);
 
         // track recipe metrics
-        analyzedStruct.recipes.emplace_back(recipe);
+        optimization.recipes.emplace_back(recipe);
       }
     }
 
     // handle recipe conflicts (merge or reject)
-    if (!analyzedStruct.recipes.empty())
+    if (!optimization.recipes.empty())
     {
       // sort by byteOffsets to detect overlapping ranges
-      std::sort(std::begin(analyzedStruct.recipes),
-                std::end(analyzedStruct.recipes),
+      std::sort(std::begin(optimization.recipes),
+                std::end(optimization.recipes),
                 [](const auto& lhs, const auto& rhs) {
                   return lhs.byteOffset < rhs.byteOffset;
                 });
 
       // check for overlaps
-      for (std::size_t idx = 1; idx < analyzedStruct.recipes.size(); ++idx)
+      for (std::size_t idx = 1; idx < optimization.recipes.size(); ++idx)
       {
-        const auto& prev = analyzedStruct.recipes[idx - 1];
-        const auto& curr = analyzedStruct.recipes[idx];
+        const auto& prev = optimization.recipes[idx - 1];
+        const auto& curr = optimization.recipes[idx];
         const std::size_t PrevByteOffsetEnd = prev.byteOffset + prev.byteLength;
 
         if (curr.byteOffset < PrevByteOffsetEnd)
@@ -192,30 +231,24 @@ alchemy::operation::refactoring::StructAlignmentOperation::analyzeStruct(
           // -> unlike clang's Replacements::add() which tests commutativity
           // for general refactoring, struct alignment recipes come from
           // non-overlapping fields
-          analyzedStruct.recipes.clear();
-          analyzedStruct.metrics.possibleSavings = 0;
-          analyzedStruct.metrics.savingsPercent = 0.0;
+          optimization.recipes.clear();
+          optimization.metrics.possibleSavings = 0;
+          optimization.metrics.savingsPercent = 0.0;
           break;
         }
       }
     }
   }
-  else
-  {
-    // no refactoring applies
-    analyzedStruct.metrics.possibleSavings = 0;
-    analyzedStruct.metrics.savingsPercent = 0.0;
-  }
+  // else: no refactoring applies —> metrics default-initialized to zero
 
-  return analyzedStruct;
+  return optimization;
 }
 
 alchemy::core::Result<alchemy::operation::RecipeOperationResult>
 alchemy::operation::refactoring::StructAlignmentOperation::execute(
     const alchemy::parser::artifacts::ParseResults& artifacts) const
 {
-  std::unordered_map<std::filesystem::path,
-                     std::vector<alchemy::operation::Recipe>>
+  std::unordered_map<std::string, std::vector<alchemy::operation::Recipe>>
       recipesByFile;
   std::vector<alchemy::metrics::Metrics> allMetrics;
 
@@ -223,19 +256,21 @@ alchemy::operation::refactoring::StructAlignmentOperation::execute(
   for (const auto& structDef : artifacts.structs)
   {
     // computes optimal layout, generates recipes and metrics
-    auto analysis = analyzeStruct(structDef);
+    auto optimization = alchemy::operation::refactoring::
+        StructAlignmentOperation::analyzeStruct(structDef);
 
     // group recipes by source file
-    if (!analysis.recipes.empty())
+    if (!optimization.recipes.empty())
     {
       auto& fileRecipes = recipesByFile[structDef.sourceFile];
-      fileRecipes.insert(std::end(fileRecipes),
-                         std::make_move_iterator(std::begin(analysis.recipes)),
-                         std::make_move_iterator(std::end(analysis.recipes)));
+      fileRecipes.insert(
+          std::end(fileRecipes),
+          std::make_move_iterator(std::begin(optimization.recipes)),
+          std::make_move_iterator(std::end(optimization.recipes)));
     }
 
     // track metrics
-    allMetrics.emplace_back(std::move(analysis.metrics));
+    allMetrics.emplace_back(std::move(optimization.metrics));
   }
 
   return alchemy::core::Result<alchemy::operation::RecipeOperationResult>::

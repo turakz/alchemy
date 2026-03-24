@@ -40,7 +40,8 @@ struct NoSizeChange {
   utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
 
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {sourceFile.string()},
                            .excludePatterns = {},
@@ -73,7 +74,8 @@ struct PartiallySorted {
   utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
 
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {sourceFile.string()},
                            .excludePatterns = {},
@@ -135,7 +137,8 @@ struct AlreadyOptimal {
   auto sourceFile = utils::createTestFile(tempDir, "mixed.h", TestCode);
   utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {sourceFile.string()},
                            .excludePatterns = {},
@@ -195,7 +198,8 @@ struct SingleField {
   utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
 
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {sourceFile.string()},
                            .excludePatterns = {},
@@ -227,7 +231,8 @@ struct SameAlign {
   utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
 
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {sourceFile.string()},
                            .excludePatterns = {},
@@ -256,7 +261,8 @@ struct EmptyStruct {
   utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
 
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {sourceFile.string()},
                            .excludePatterns = {},
@@ -285,6 +291,7 @@ struct TestStruct {
   auto cFile = utils::createTestFile(tempDir, "test.h", StructCode);
   utils::createSyntheticCompilationDatabase(buildDir, {cFile.string()});
   auto cApp = utils::createAlchemyWithMockOptions(utils::MockCliConfig{
+      .rootDir = tempDir,
       .buildDir = buildDir,  // valid build dir with compile_commands.json
       .outputDir = tempDir,
       .sourceFiles = {cFile.string()},
@@ -296,6 +303,7 @@ struct TestStruct {
   auto cxxFile = utils::createTestFile(tempDir, "test.hpp", StructCode);
   utils::createSyntheticCompilationDatabase(buildDir, {cxxFile.string()});
   auto cxxApp = utils::createAlchemyWithMockOptions(utils::MockCliConfig{
+      .rootDir = tempDir,
       .buildDir = buildDir,  // valid build dir with compile_commands.json
       .outputDir = tempDir,
       .sourceFiles = {cxxFile.string()},
@@ -333,7 +341,8 @@ struct TestStruct {
 
   // run first time
   auto appResult1 = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {sourceFile.string()},
                            .excludePatterns = {},
@@ -346,7 +355,8 @@ struct TestStruct {
 
   // run second time on already-optimized struct
   auto appResult2 = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {sourceFile.string()},
                            .excludePatterns = {},
@@ -377,7 +387,8 @@ struct AdjacentFields {
   utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
 
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {sourceFile.string()},
                            .excludePatterns = {},
@@ -424,7 +435,8 @@ struct UnoptimizedStruct {
   utils::createSyntheticCompilationDatabase(tempDir, {headerPath});
 
   auto appResult = utils::createAlchemyWithMockOptions(
-      utils::MockCliConfig{.buildDir = tempDir,
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
                            .outputDir = tempDir,
                            .sourceFiles = {headerPath},
                            .excludePatterns = {},
@@ -454,6 +466,588 @@ struct UnoptimizedStruct {
   ASSERT_EQ(TransmutedStr, TestCode)
       << "alchemy::testing::integration::struct fields should be reordered for "
          "optimal alignment";
+}
+
+TEST_F(SalignIntegrationTest, ArrayFieldPreservesCorrectSyntax)
+{
+  // struct layout before: char(1) + pad(3) + int(4) + uint8_t[3](3) + pad(1)
+  // = 12 bytes. after reordering: int(4) + char(1) + uint8_t[3](3) = 8 bytes.
+  // the array field must be reordered to verify correct syntax generation
+  const std::string TestCode = R"(
+#include <stdint.h>
+
+struct WithArrayField {
+  uint8_t data[3];
+  int value;
+  char tag;
+};)";
+  auto sourceFile = utils::createTestFile(tempDir, "array_field.h", TestCode);
+  utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
+
+  auto appResult = utils::createAlchemyWithMockOptions(
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
+                           .outputDir = tempDir,
+                           .sourceFiles = {sourceFile.string()},
+                           .excludePatterns = {},
+                           .enableSalign = true});
+
+  ASSERT_TRUE(appResult.valid());
+  const int ExitCode = appResult.value().exec();
+  ASSERT_EQ(ExitCode, 0);
+
+  const std::string Content = utils::readFile(sourceFile);
+
+  // verify array field has correct C syntax: type name[size], not type[size]
+  // name
+  ASSERT_NE(Content.find("data[3]"), std::string::npos)
+      << "alchemy::testing::integration::array field should preserve "
+         "correct C syntax (name[size])";
+  ASSERT_EQ(Content.find("uint8_t[3]"), std::string::npos)
+      << "alchemy::testing::integration::array brackets should not be "
+         "on the type (type[size] name is invalid C)";
+
+  // verify optimization occurred (int should come before uint8_t array)
+  ASSERT_LT(Content.find("int value"), Content.find("uint8_t data"))
+      << "alchemy::testing::integration::int should be reordered "
+         "before uint8_t array";
+}
+
+TEST_F(SalignIntegrationTest, ArrayFieldPreservesMacroDimensions)
+{
+  // array dimensions defined via macros must be preserved in the reordered
+  // output — clang's canonical type name resolves them to literals which
+  // would break the code if the macro value changes
+  const std::string TestCode = R"(
+#include <stdint.h>
+
+#define SERIAL_LEN 11
+
+struct WithMacroArray {
+  uint8_t serial[SERIAL_LEN];
+  int32_t id;
+  char tag;
+};)";
+  auto sourceFile = utils::createTestFile(tempDir, "macro_array.h", TestCode);
+  utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
+
+  auto appResult = utils::createAlchemyWithMockOptions(
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
+                           .outputDir = tempDir,
+                           .sourceFiles = {sourceFile.string()},
+                           .excludePatterns = {},
+                           .enableSalign = true});
+
+  ASSERT_TRUE(appResult.valid());
+  const int ExitCode = appResult.value().exec();
+  ASSERT_EQ(ExitCode, 0);
+
+  const std::string Content = utils::readFile(sourceFile);
+
+  // macro name must be preserved, not resolved to literal "11"
+  ASSERT_NE(Content.find("[SERIAL_LEN]"), std::string::npos)
+      << "array dimension macro should be preserved in reordered output";
+  ASSERT_EQ(Content.find("[11]"), std::string::npos)
+      << "array dimension macro should NOT be resolved to literal value";
+
+  // verify optimization occurred (int32_t should come before uint8_t array)
+  ASSERT_LT(Content.find("int32_t id"), Content.find("uint8_t serial"))
+      << "int32_t should be reordered before uint8_t array";
+}
+
+TEST_F(SalignIntegrationTest, FileWithIncludeGuardsPreservesPrefix)
+{
+  const std::string TestCode = R"(
+#ifndef MY_HEADER_H
+#define MY_HEADER_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#define MAX_NAME_LEN 32
+
+typedef enum {
+  STATUS_OK = 0,
+  STATUS_ERR = 1
+} Status_t;
+
+typedef struct MyStruct {
+  char tag;
+  double value;
+  int count;
+} MyStruct_t;
+
+#endif /* MY_HEADER_H */)";
+  auto sourceFile =
+      utils::createTestFile(tempDir, "guarded_header.h", TestCode);
+  utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
+
+  auto appResult = utils::createAlchemyWithMockOptions(
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
+                           .outputDir = tempDir,
+                           .sourceFiles = {sourceFile.string()},
+                           .excludePatterns = {},
+                           .enableSalign = true});
+
+  ASSERT_TRUE(appResult.valid());
+  const int ExitCode = appResult.value().exec();
+  ASSERT_EQ(ExitCode, 0);
+
+  const std::string Content = utils::readFile(sourceFile);
+
+  // verify include guard is preserved
+  ASSERT_NE(Content.find("#ifndef MY_HEADER_H"), std::string::npos)
+      << "alchemy::testing::integration::include guard should be preserved";
+  ASSERT_NE(Content.find("#define MY_HEADER_H"), std::string::npos)
+      << "alchemy::testing::integration::include guard define should "
+         "be preserved";
+  ASSERT_NE(Content.find("#endif"), std::string::npos)
+      << "alchemy::testing::integration::endif should be preserved";
+
+  // verify includes are preserved
+  ASSERT_NE(Content.find("#include <stdint.h>"), std::string::npos)
+      << "alchemy::testing::integration::includes should be preserved";
+
+  // verify defines are preserved
+  ASSERT_NE(Content.find("#define MAX_NAME_LEN 32"), std::string::npos)
+      << "alchemy::testing::integration::defines should be preserved";
+
+  // verify enum is preserved
+  ASSERT_NE(Content.find("typedef enum"), std::string::npos)
+      << "alchemy::testing::integration::enum should be preserved";
+
+  // verify typedef struct syntax is preserved
+  ASSERT_NE(Content.find("typedef struct MyStruct"), std::string::npos)
+      << "alchemy::testing::integration::typedef struct should be preserved";
+  ASSERT_NE(Content.find("} MyStruct_t;"), std::string::npos)
+      << "alchemy::testing::integration::typedef closing should be preserved";
+}
+
+TEST_F(SalignIntegrationTest, BoolFieldPreservesSourceSpelling)
+{
+  // clang's getAsString() returns "_Bool" for C's bool macro —
+  // the replacement text should use the source spelling "bool"
+  const std::string TestCode = R"(
+#include <stdbool.h>
+
+struct WithBool {
+  bool flag;
+  double value;
+  int count;
+};)";
+  auto sourceFile = utils::createTestFile(tempDir, "bool_field.h", TestCode);
+  utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
+
+  auto appResult = utils::createAlchemyWithMockOptions(
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
+                           .outputDir = tempDir,
+                           .sourceFiles = {sourceFile.string()},
+                           .excludePatterns = {},
+                           .enableSalign = true});
+
+  ASSERT_TRUE(appResult.valid());
+  const int ExitCode = appResult.value().exec();
+  ASSERT_EQ(ExitCode, 0);
+
+  const std::string Content = utils::readFile(sourceFile);
+
+  ASSERT_NE(Content.find("bool flag"), std::string::npos)
+      << "alchemy::testing::integration::replacement should use "
+         "source spelling 'bool', not '_Bool'";
+  ASSERT_EQ(Content.find("_Bool"), std::string::npos)
+      << "alchemy::testing::integration::clang canonical '_Bool' "
+         "should not appear in output";
+}
+
+TEST_F(SalignIntegrationTest, TrailingBlockCommentsPreserved)
+{
+  // trailing C block comments (/* ... */) should travel with their field
+  // during reordering so documentation stays paired with the correct field
+  const std::string TestCode = R"(
+struct WithBlockComments {
+  char tag;       /* tag identifier */
+  double value;   /* measured value */
+  int count;      /* number of samples */
+};)";
+  auto sourceFile =
+      utils::createTestFile(tempDir, "block_comments.h", TestCode);
+  utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
+
+  auto appResult = utils::createAlchemyWithMockOptions(
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
+                           .outputDir = tempDir,
+                           .sourceFiles = {sourceFile.string()},
+                           .excludePatterns = {},
+                           .enableSalign = true});
+
+  ASSERT_TRUE(appResult.valid());
+  const int ExitCode = appResult.value().exec();
+  ASSERT_EQ(ExitCode, 0);
+
+  const std::string Content = utils::readFile(sourceFile);
+
+  // verify reordering occurred (double should come first)
+  ASSERT_LT(Content.find("double value"), Content.find("char tag"))
+      << "alchemy::testing::integration::double should be reordered "
+         "before char";
+
+  // verify trailing block comments travel with their fields
+  auto doublePos = Content.find("double value");
+  auto measuredPos = Content.find("/* measured value */");
+  auto tagIdentPos = Content.find("/* tag identifier */");
+  auto charPos = Content.find("char tag");
+
+  ASSERT_NE(measuredPos, std::string::npos)
+      << "alchemy::testing::integration::block comment for 'value' "
+         "should be preserved";
+  ASSERT_NE(tagIdentPos, std::string::npos)
+      << "alchemy::testing::integration::block comment for 'tag' "
+         "should be preserved";
+
+  // "measured value" comment should appear after "double value"
+  ASSERT_LT(doublePos, measuredPos)
+      << "alchemy::testing::integration::block comment should follow "
+         "its field after reordering";
+
+  // "tag identifier" comment should appear after "char tag"
+  ASSERT_LT(charPos, tagIdentPos)
+      << "alchemy::testing::integration::block comment should follow "
+         "its field after reordering";
+}
+
+TEST_F(SalignIntegrationTest, TrailingLineCommentsPreserved)
+{
+  // trailing C++ line comments (// ...) should travel with their field
+  // during reordering so documentation stays paired with the correct field
+  const std::string TestCode = R"(
+struct WithLineComments {
+  char tag;       // tag identifier
+  double value;   // measured value
+  int count;      // number of samples
+};)";
+  auto sourceFile = utils::createTestFile(tempDir, "line_comments.h", TestCode);
+  utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
+
+  auto appResult = utils::createAlchemyWithMockOptions(
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
+                           .outputDir = tempDir,
+                           .sourceFiles = {sourceFile.string()},
+                           .excludePatterns = {},
+                           .enableSalign = true});
+
+  ASSERT_TRUE(appResult.valid());
+  const int ExitCode = appResult.value().exec();
+  ASSERT_EQ(ExitCode, 0);
+
+  const std::string Content = utils::readFile(sourceFile);
+
+  // verify reordering occurred
+  ASSERT_LT(Content.find("double value"), Content.find("char tag"))
+      << "alchemy::testing::integration::double should be reordered "
+         "before char";
+
+  // verify line comments travel with their fields
+  auto doublePos = Content.find("double value");
+  auto measuredPos = Content.find("// measured value");
+  auto tagIdentPos = Content.find("// tag identifier");
+  auto charPos = Content.find("char tag");
+
+  ASSERT_NE(measuredPos, std::string::npos)
+      << "alchemy::testing::integration::line comment for 'value' "
+         "should be preserved";
+  ASSERT_NE(tagIdentPos, std::string::npos)
+      << "alchemy::testing::integration::line comment for 'tag' "
+         "should be preserved";
+
+  // "measured value" comment should appear after "double value"
+  ASSERT_LT(doublePos, measuredPos)
+      << "alchemy::testing::integration::line comment should follow "
+         "its field after reordering";
+
+  // "tag identifier" comment should appear after "char tag"
+  ASSERT_LT(charPos, tagIdentPos)
+      << "alchemy::testing::integration::line comment should follow "
+         "its field after reordering";
+}
+
+TEST_F(SalignIntegrationTest, PrecedingLineCommentsPreserved)
+{
+  // preceding line comments (// ...) should travel with their field
+  // during reordering so documentation stays paired with the correct field
+  const std::string TestCode = R"(
+struct WithPrecedingComments {
+  // tag identifier
+  char tag;
+  // measured value
+  double value;
+  // number of samples
+  int count;
+};)";
+  auto sourceFile =
+      utils::createTestFile(tempDir, "preceding_line_comments.h", TestCode);
+  utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
+
+  auto appResult = utils::createAlchemyWithMockOptions(
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
+                           .outputDir = tempDir,
+                           .sourceFiles = {sourceFile.string()},
+                           .excludePatterns = {},
+                           .enableSalign = true});
+
+  ASSERT_TRUE(appResult.valid());
+  const int ExitCode = appResult.value().exec();
+  ASSERT_EQ(ExitCode, 0);
+
+  const std::string Content = utils::readFile(sourceFile);
+
+  // verify reordering occurred (double should come first)
+  ASSERT_LT(Content.find("double value"), Content.find("char tag"))
+      << "alchemy::testing::integration::double should be reordered "
+         "before char";
+
+  // verify preceding comments travel with their fields
+  auto measuredPos = Content.find("// measured value");
+  auto doublePos = Content.find("double value");
+  auto tagIdentPos = Content.find("// tag identifier");
+  auto charPos = Content.find("char tag");
+
+  ASSERT_NE(measuredPos, std::string::npos)
+      << "alchemy::testing::integration::preceding comment for 'value' "
+         "should be preserved";
+  ASSERT_NE(tagIdentPos, std::string::npos)
+      << "alchemy::testing::integration::preceding comment for 'tag' "
+         "should be preserved";
+
+  // "measured value" comment should appear before "double value"
+  ASSERT_LT(measuredPos, doublePos)
+      << "alchemy::testing::integration::preceding comment should precede "
+         "its field after reordering";
+
+  // "tag identifier" comment should appear before "char tag"
+  ASSERT_LT(tagIdentPos, charPos)
+      << "alchemy::testing::integration::preceding comment should precede "
+         "its field after reordering";
+}
+
+TEST_F(SalignIntegrationTest, PrecedingDocCommentPreserved)
+{
+  // Doxygen-style preceding comments (/// ...) should travel with their field
+  const std::string TestCode = R"(
+struct WithDocComments {
+  /// tag identifier
+  char tag;
+  /// measured value
+  double value;
+  /// number of samples
+  int count;
+};)";
+  auto sourceFile =
+      utils::createTestFile(tempDir, "preceding_doc_comments.h", TestCode);
+  utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
+
+  auto appResult = utils::createAlchemyWithMockOptions(
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
+                           .outputDir = tempDir,
+                           .sourceFiles = {sourceFile.string()},
+                           .excludePatterns = {},
+                           .enableSalign = true});
+
+  ASSERT_TRUE(appResult.valid());
+  const int ExitCode = appResult.value().exec();
+  ASSERT_EQ(ExitCode, 0);
+
+  const std::string Content = utils::readFile(sourceFile);
+
+  // verify reordering occurred
+  ASSERT_LT(Content.find("double value"), Content.find("char tag"))
+      << "alchemy::testing::integration::double should be reordered "
+         "before char";
+
+  // verify doc comments travel with their fields
+  auto measuredPos = Content.find("/// measured value");
+  auto doublePos = Content.find("double value");
+  auto tagIdentPos = Content.find("/// tag identifier");
+  auto charPos = Content.find("char tag");
+
+  ASSERT_NE(measuredPos, std::string::npos)
+      << "alchemy::testing::integration::doc comment for 'value' "
+         "should be preserved";
+  ASSERT_NE(tagIdentPos, std::string::npos)
+      << "alchemy::testing::integration::doc comment for 'tag' "
+         "should be preserved";
+
+  ASSERT_LT(measuredPos, doublePos)
+      << "alchemy::testing::integration::doc comment should precede "
+         "its field after reordering";
+
+  ASSERT_LT(tagIdentPos, charPos)
+      << "alchemy::testing::integration::doc comment should precede "
+         "its field after reordering";
+}
+
+TEST_F(SalignIntegrationTest, PrecedingBlockCommentPreserved)
+{
+  // preceding block comments (/* ... */) should travel with their field
+  const std::string TestCode = R"(
+struct WithPrecedingBlockComments {
+  /* tag identifier */
+  char tag;
+  /* measured value */
+  double value;
+  /* number of samples */
+  int count;
+};)";
+  auto sourceFile =
+      utils::createTestFile(tempDir, "preceding_block_comments.h", TestCode);
+  utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
+
+  auto appResult = utils::createAlchemyWithMockOptions(
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
+                           .outputDir = tempDir,
+                           .sourceFiles = {sourceFile.string()},
+                           .excludePatterns = {},
+                           .enableSalign = true});
+
+  ASSERT_TRUE(appResult.valid());
+  const int ExitCode = appResult.value().exec();
+  ASSERT_EQ(ExitCode, 0);
+
+  const std::string Content = utils::readFile(sourceFile);
+
+  // verify reordering occurred
+  ASSERT_LT(Content.find("double value"), Content.find("char tag"))
+      << "alchemy::testing::integration::double should be reordered "
+         "before char";
+
+  // verify preceding block comments travel with their fields
+  auto measuredPos = Content.find("/* measured value */");
+  auto doublePos = Content.find("double value");
+  auto tagIdentPos = Content.find("/* tag identifier */");
+  auto charPos = Content.find("char tag");
+
+  ASSERT_NE(measuredPos, std::string::npos)
+      << "alchemy::testing::integration::preceding block comment for 'value' "
+         "should be preserved";
+  ASSERT_NE(tagIdentPos, std::string::npos)
+      << "alchemy::testing::integration::preceding block comment for 'tag' "
+         "should be preserved";
+
+  ASSERT_LT(measuredPos, doublePos)
+      << "alchemy::testing::integration::preceding block comment should "
+         "precede its field after reordering";
+
+  ASSERT_LT(tagIdentPos, charPos)
+      << "alchemy::testing::integration::preceding block comment should "
+         "precede its field after reordering";
+}
+
+TEST_F(SalignIntegrationTest, MultiLinePrecedingCommentPreserved)
+{
+  // multi-line preceding comments should travel with their field
+  const std::string TestCode = R"(
+struct WithMultiLineComments {
+  // tag identifier
+  // used for lookup
+  char tag;
+  // measured value
+  // in SI units
+  double value;
+  // number of samples
+  int count;
+};)";
+  auto sourceFile =
+      utils::createTestFile(tempDir, "multiline_preceding.h", TestCode);
+  utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
+
+  auto appResult = utils::createAlchemyWithMockOptions(
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
+                           .outputDir = tempDir,
+                           .sourceFiles = {sourceFile.string()},
+                           .excludePatterns = {},
+                           .enableSalign = true});
+
+  ASSERT_TRUE(appResult.valid());
+  const int ExitCode = appResult.value().exec();
+  ASSERT_EQ(ExitCode, 0);
+
+  const std::string Content = utils::readFile(sourceFile);
+
+  // verify reordering occurred
+  ASSERT_LT(Content.find("double value"), Content.find("char tag"))
+      << "alchemy::testing::integration::double should be reordered "
+         "before char";
+
+  // verify both lines of multi-line comments travel together
+  ASSERT_NE(Content.find("// measured value"), std::string::npos)
+      << "first line of multi-line comment preserved";
+  ASSERT_NE(Content.find("// in SI units"), std::string::npos)
+      << "second line of multi-line comment preserved";
+
+  // "in SI units" should appear before "double value" (it's part of value's
+  // comment)
+  ASSERT_LT(Content.find("// in SI units"), Content.find("double value"))
+      << "multi-line comment should precede its field after reordering";
+
+  // "used for lookup" should appear before "char tag" (it's part of tag's
+  // comment)
+  ASSERT_LT(Content.find("// used for lookup"), Content.find("char tag"))
+      << "multi-line comment should precede its field after reordering";
+}
+
+TEST_F(SalignIntegrationTest, PrecedingAndTrailingCommentsPreserved)
+{
+  // fields with both preceding and trailing comments should preserve both
+  const std::string TestCode = R"(
+struct WithBothComments {
+  // tag identifier
+  char tag;       // single char
+  // measured value
+  double value;   // floating point
+  // number of samples
+  int count;      // positive only
+};)";
+  auto sourceFile = utils::createTestFile(tempDir, "both_comments.h", TestCode);
+  utils::createSyntheticCompilationDatabase(tempDir, {sourceFile.string()});
+
+  auto appResult = utils::createAlchemyWithMockOptions(
+      utils::MockCliConfig{.rootDir = tempDir,
+                           .buildDir = tempDir,
+                           .outputDir = tempDir,
+                           .sourceFiles = {sourceFile.string()},
+                           .excludePatterns = {},
+                           .enableSalign = true});
+
+  ASSERT_TRUE(appResult.valid());
+  const int ExitCode = appResult.value().exec();
+  ASSERT_EQ(ExitCode, 0);
+
+  const std::string Content = utils::readFile(sourceFile);
+
+  // verify reordering occurred
+  ASSERT_LT(Content.find("double value"), Content.find("char tag"))
+      << "alchemy::testing::integration::double should be reordered "
+         "before char";
+
+  // verify preceding comments travel with their fields
+  ASSERT_LT(Content.find("// measured value"), Content.find("double value"))
+      << "preceding comment should precede its field after reordering";
+  ASSERT_LT(Content.find("// tag identifier"), Content.find("char tag"))
+      << "preceding comment should precede its field after reordering";
+
+  // verify trailing comments travel with their fields
+  ASSERT_LT(Content.find("double value"), Content.find("// floating point"))
+      << "trailing comment should follow its field after reordering";
+  ASSERT_LT(Content.find("char tag"), Content.find("// single char"))
+      << "trailing comment should follow its field after reordering";
 }
 
 }  // namespace alchemy::testing

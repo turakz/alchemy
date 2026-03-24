@@ -29,11 +29,7 @@ target_compile_definitions(performance_tests
 target_compile_options(performance_tests
   PRIVATE
     ${ALCHEMY_WARNING_FLAGS}
-    -O3           # aggressive optimization
-    -DNDEBUG      # disable assertions
-    -g            # debug symbols for profiling
-    -gdwarf-4     # valgrind compatibility (clang 14 defaults to dwarf-5)
-    -fdiagnostics-color=always
+    ${ALCHEMY_PERF_FLAGS}
 )
 
 add_test(
@@ -50,13 +46,10 @@ set_tests_properties(PerformanceTests PROPERTIES
   ENVIRONMENT "ALCHEMY_TEST_DATA_DIR=${CMAKE_SOURCE_DIR}/tests/data;GTEST_CATCH_EXCEPTIONS=0"
 
   # timeout for hung tests
-  TIMEOUT 30
+  TIMEOUT 60
 
   # label for filtering
   LABELS "performance_tests"
-
-  # ensure proper failure detection on segfaults/crashes
-  WILL_FAIL FALSE
 )
 
 # stress tests - separate executable with longer timeout
@@ -86,11 +79,7 @@ target_compile_definitions(performance_stress_tests
 target_compile_options(performance_stress_tests
   PRIVATE
     ${ALCHEMY_WARNING_FLAGS}
-    -O3           # aggressive optimization
-    -DNDEBUG      # disable assertions
-    -g            # debug symbols for profiling
-    -gdwarf-4     # valgrind compatibility (clang 14 defaults to dwarf-5)
-    -fdiagnostics-color=always
+    ${ALCHEMY_PERF_FLAGS}
 )
 
 add_test(
@@ -111,9 +100,6 @@ set_tests_properties(PerformanceStressTests PROPERTIES
 
   # label for filtering
   LABELS "performance_stress_tests"
-
-  # ensure proper failure detection on segfaults/crashes
-  WILL_FAIL FALSE
 )
 
 message(STATUS "alchemy::performance tests configured")

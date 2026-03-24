@@ -1,15 +1,23 @@
 # ============================================================================
 # Alchemy CMake Configuration
 # ============================================================================
-# minimum CMake version: 3.14 for FetchContent improvements
-# (previously 3.2, but modern CMake features require >= 3.14)
-cmake_minimum_required(VERSION 3.28)
+# minimum CMake version: 3.21 for CMakePresets.json build/test presets
+# (previously 3.14 for FetchContent; bumped for modern preset support)
+cmake_minimum_required(VERSION 3.21)
 
 # project declaration
 project(alchemy
   LANGUAGES C CXX
-  VERSION 1.0.0
+  VERSION 0.1.0
   DESCRIPTION "c++ refactoring and code generation tool built on libclang/llvm"
+)
+
+set(ALCHEMY_VERSION_SUFFIX "alpha")
+
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/inc/app/version.hpp.in
+  ${CMAKE_CURRENT_BINARY_DIR}/generated/app/version.hpp
+  @ONLY
 )
 
 # ============================================================================
@@ -20,6 +28,9 @@ project(alchemy
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)  # disable GNU extensions (-std=c++20, not -std=gnu++20)
+
+# colored compiler diagnostics (applied to all targets)
+add_compile_options(-fdiagnostics-color=always)
 
 # export compile_commands.json for tooling (clang-tidy, clangd, etc.)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -34,8 +45,8 @@ if(NOT DEFINED ALCHEMY_TOOLCHAIN_LOADED)
   message(WARNING
     "\nalchemy::WARNING: clang toolchain not detected!\n"
     "-> this may cause inconsistent builds across different machines.\n"
-    "-> recommend running CMake with:\n"
-    "   cmake -S. -Bbuild -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/clang.cmake\n"
+    "-> recommend running CMake with presets:\n"
+    "   cmake --preset debug\n"
     "-> or use the Makefile: make alchemy.debug\n"
   )
 endif()
@@ -56,44 +67,11 @@ endif()
 # dependency discovery
 # ============================================================================
 
-# find LLVM (minimum version 10 for stable APIs, recommend 14+)
+# find LLVM (minimum version 12 -> lowest supported via Ubuntu 20.04)
 # note: find_package in CONFIG mode looks for LLVMConfig.cmake
-find_package(LLVM REQUIRED CONFIG)
+find_package(LLVM ${LLVM_PACKAGE_VERSION} CONFIG)
 
-if(LLVM_FOUND)
-  if(ALCHEMY_LLVM_AUTODETECTED)
-    message(WARNING "alchemy::auto-detected LLVM from ${LLVM_DIR} (set LLVM_DIR to override)")
-  endif()
-  message(STATUS "alchemy::found LLVM ${LLVM_PACKAGE_VERSION}")
-  message(STATUS "alchemy::using LLVMConfig.cmake in: ${LLVM_DIR}")
-
-  # optional: query LLVM's build configuration
-  # useful for debugging ABI mismatch issues
-  if(LLVM_TOOLS_BINARY_DIR)
-    execute_process(
-      COMMAND ${LLVM_TOOLS_BINARY_DIR}/llvm-config --cxxflags
-      OUTPUT_VARIABLE LLVM_CXX_FLAGS
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET
-    )
-    if(LLVM_CXX_FLAGS)
-      message(STATUS "alchemy::LLVM compiled with flags: ${LLVM_CXX_FLAGS}")
-
-      # check for stdlib mismatch (libc++ vs libstdc++)
-      # LLVM built with libc++ contains "-stdlib=libc++" in flags
-      # we should match that in our build to avoid ABI issues
-      if(LLVM_CXX_FLAGS MATCHES "-stdlib=libc\\+\\+" AND
-         NOT CMAKE_CXX_FLAGS MATCHES "-stdlib=libc\\+\\+")
-        message(WARNING
-          "alchemy::WARNING: LLVM was built with libc++, but you're using libstdc++\n"
-          "-> this WILL cause ABI compatibility issues (crashes, linker errors).\n"
-          "-> to use libc++, uncomment the line in cmake/toolchains/clang.cmake\n"
-          "-> and install libc++-dev: sudo apt install libc++-dev libc++abi-dev"
-        )
-      endif()
-    endif()
-  endif()
-else()
+if(NOT LLVM_FOUND)
   message(FATAL_ERROR
     "\nalchemy::ERROR: LLVM not found!\n"
     "please install LLVM/clang before building.\n\n"
@@ -106,12 +84,16 @@ else()
   )
 endif()
 
-# find clang libraries
-find_package(Clang REQUIRED CONFIG)
+if(ALCHEMY_LLVM_AUTODETECTED)
+  message(WARNING "alchemy::auto-detected LLVM from ${LLVM_DIR} (set LLVM_DIR to override)")
+endif()
+message(STATUS "alchemy::found LLVM ${LLVM_PACKAGE_VERSION}")
+message(STATUS "alchemy::using LLVMConfig.cmake in: ${LLVM_DIR}")
 
-if(Clang_FOUND)
-  message(STATUS "alchemy::found clang libraries in: ${Clang_DIR}")
-else()
+# find clang libraries
+find_package(Clang CONFIG)
+
+if(NOT Clang_FOUND)
   message(FATAL_ERROR
     "\nalchemy::ERROR: clang libraries not found!\n"
     "please install clang with C++ API support.\n\n"
@@ -124,21 +106,24 @@ else()
   )
 endif()
 
+message(STATUS "alchemy::found clang libraries in: ${Clang_DIR}")
+
 # find fmtlib for modern string formatting
-find_package(fmt REQUIRED CONFIG)
+# prefer system package (libfmt-dev on Linux, brew on macOS)
+# fall back to FetchContent (Windows, or when system package is unavailable)
+find_package(fmt 9 CONFIG)
 
 if(fmt_FOUND)
   message(STATUS "alchemy::found fmt ${fmt_VERSION}")
 else()
-  message(FATAL_ERROR
-    "\nalchemy::ERROR: fmt library not found!\n"
-    "please install it before building:\n"
-    "Linux (Ubuntu/Debian): sudo apt install libfmt-dev\n"
-    "macOS (Homebrew): brew install fmt\n"
-    "Windows (Chocolatey): choco install fmt\n\n"
-    "alternatively, use FetchContent to include fmt in the project.\n"
-    "-> or run make setup\n"
+  message(STATUS "alchemy::fmt not found via system packages, fetching via FetchContent...")
+  include(FetchContent)
+  FetchContent_Declare(
+    fmt
+    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+    GIT_TAG        9.1.0
   )
+  FetchContent_MakeAvailable(fmt)
 endif()
 
 # ============================================================================
@@ -166,7 +151,15 @@ set(ALCHEMY_DEBUG_FLAGS
   -gdwarf-4     # valgrind compatibility (clang 14 defaults to dwarf-5)
 )
 
-# NOTE: No release-specific flags needed - CMake automatically adds -O3 -DNDEBUG
+# NOTE: no release-specific flags needed - CMake automatically adds -O3 -DNDEBUG
+
+# performance test flags: always optimized regardless of build type
+set(ALCHEMY_PERF_FLAGS
+  -O3           # aggressive optimization
+  -DNDEBUG      # disable assertions
+  -g            # debug symbols for profiling
+  -gdwarf-4     # valgrind compatibility (clang 14 defaults to dwarf-5)
+)
 
 # ============================================================================
 # library target: alchemy_lib
@@ -175,8 +168,9 @@ set(ALCHEMY_DEBUG_FLAGS
 add_library(alchemy_lib STATIC
   src/app/app.cpp
   src/cli/cli.cpp
-  src/config/config.cpp
+  src/cli/config_parser.cpp
   src/files/discovery.cpp
+  src/logger/logger.cpp
   src/operation/refactoring/salign_operation.cpp
   src/parsing/artifacts/artifacts.cpp
   src/parsing/libclang/clang_parser.cpp
@@ -184,6 +178,8 @@ add_library(alchemy_lib STATIC
   src/parsing/libclang/clang_struct_parsing_rule.cpp
   src/parsing/libclang/compiler_adapters/clang_compilation_database_adapter.cpp
   src/parsing/libclang/compiler_adapters/clang_compilation_database_factory.cpp
+  src/parsing/libclang/compiler_adapters/compiler_utils.cpp
+  src/parsing/libclang/compiler_adapters/gcc_database_translator.cpp
   src/parsing/libclang/compiler_adapters/iar_database_translator.cpp
   src/parsing/libclang/compiler_adapters/msvc_database_translator.cpp
   src/pipeline/pipeline.cpp
@@ -197,6 +193,8 @@ add_library(alchemy_lib STATIC
 target_include_directories(alchemy_lib
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inc
+  PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 
 # system headers (suppress warnings from LLVM/clang headers)
@@ -205,6 +203,7 @@ target_include_directories(alchemy_lib
   SYSTEM PUBLIC
     ${LLVM_INCLUDE_DIRS}
     ${CLANG_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/external
 )
 
 # link against LLVM/clang libraries
@@ -229,7 +228,6 @@ target_compile_options(alchemy_lib
   PRIVATE
     ${ALCHEMY_WARNING_FLAGS}
     $<$<CONFIG:Debug>:${ALCHEMY_DEBUG_FLAGS}>
-    -fdiagnostics-color=always  # colored compiler output
 )
 
 # ============================================================================
@@ -247,7 +245,6 @@ target_compile_options(alchemy
   PRIVATE
     ${ALCHEMY_WARNING_FLAGS}
     $<$<CONFIG:Debug>:${ALCHEMY_DEBUG_FLAGS}>
-    -fdiagnostics-color=always
 )
 
 # ============================================================================
@@ -257,29 +254,13 @@ target_compile_options(alchemy
 if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
   message(STATUS "alchemy::found tests directory, configuring tests...")
 
-  # fetch GoogleTest from GitHub
-  include(FetchContent)
-  FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG        v1.14.0
-  )
-
-  # GoogleTest configuration
-  set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-  set(BUILD_GMOCK ON CACHE BOOL "" FORCE)
-  set(BUILD_GTEST ON CACHE BOOL "" FORCE)
-  set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
-
-  FetchContent_MakeAvailable(googletest)
-
   enable_testing()
 
   # configure CTest for better failure reporting
   set(CTEST_OUTPUT_ON_FAILURE ON)
   set(ENV{CTEST_OUTPUT_ON_FAILURE} 1)
 
-  # add test subdirectory (contains test executables)
+  # add test subdirectory (contains test executables and GoogleTest dependency)
   add_subdirectory(tests)
 
   # ========================================================================
@@ -300,8 +281,8 @@ if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
   option(ENABLE_SANITIZERS "Enable address and undefined behavior sanitizers" OFF)
   if(ENABLE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     message(STATUS "alchemy::sanitizers enabled (ASan + UBSan)")
-    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
-    add_link_options(-fsanitize=address,undefined)
+    target_compile_options(alchemy_lib PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(alchemy_lib PUBLIC -fsanitize=address,undefined)
   endif()
 endif()
 

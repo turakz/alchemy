@@ -2,7 +2,7 @@
 # Portable format checking with clang-format (no modifications)
 # Usage: cmake -P cmake/scripts/format_check.cmake
 
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.21)
 
 # Get source directory (project root)
 if(NOT DEFINED SOURCE_DIR)
@@ -31,8 +31,12 @@ endif()
 list(LENGTH ALL_FILES FILE_COUNT)
 message(STATUS "  checking ${FILE_COUNT} files...")
 
-# Check if clang-format is available
-find_program(CLANG_FORMAT clang-format)
+# Check if clang-format is available (prefer versioned binary if passed via -DCLANG_FORMAT_BIN=...)
+if(DEFINED CLANG_FORMAT_BIN)
+  find_program(CLANG_FORMAT "${CLANG_FORMAT_BIN}")
+else()
+  find_program(CLANG_FORMAT clang-format)
+endif()
 if(NOT CLANG_FORMAT)
   message(FATAL_ERROR "clang-format not found. Install it with 'make setup' or manually.")
 endif()

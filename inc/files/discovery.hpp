@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <regex>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -50,7 +51,7 @@ findCandidateFiles(const DiscoveryConfig& config);
 // phase 3: optimized pattern matching
 // pre-compile patterns (avoids recompiling regex per file)
 std::string
-globToRegex(const std::string& pattern);
+globToRegex(std::string_view pattern);
 
 std::vector<CompiledPattern>
 compilePatterns(const std::vector<std::string>& patterns);
