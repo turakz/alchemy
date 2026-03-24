@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+sudo apt remove --purge \
+  clang-14 \
+  clang-tools-14 \
+  clangd-14 \
+  libclang-common-14-dev \
+  libclang-cpp14t64 \
+  libclang-rt-14-dev \
+  libclang1-14t64 \
+  liblldb-14t64 \
+  libllvm14t64 \
+  lldb-14 \
+  llvm-14 \
+  llvm-14-dev \
+  llvm-14-linker-tools \
+  llvm-14-runtime \
+  llvm-14-tools \
+  python3-lldb-14 \
+  clang-17 \
+  clang-format-17 \
+  clang-tidy-17 \
+  clangd-17 \
+  llvm-17 \
+  llvm-17-dev \
+  llvm-17-runtime \
+  libclang-17-dev \
+  libclang-common-17-dev \
+  libc++-17-dev \
+  libc++abi-17-dev \
+  lld-17 \
+  lldb-17 -y
