@@ -1,0 +1,7 @@
+#pragma once
+
+#include <string_view>
+
+namespace alchemy {
+inline constexpr std::string_view Version = "@PROJECT_VERSION@-@ALCHEMY_VERSION_SUFFIX@";
+}
